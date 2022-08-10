@@ -1,0 +1,9 @@
+[package]
+name = "cpplumber"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clang = "2.0"
+anyhow = "1.0"
+structopt = "0.3"
