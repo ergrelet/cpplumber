@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use clang::{Clang, Entity, EntityKind, Index};
+use glob::glob;
 use structopt::StructOpt;
 use widestring::{encode_utf16, encode_utf32};
 
@@ -19,8 +20,7 @@ struct CpplumberOptions {
     #[structopt(parse(from_os_str), short, long = "bin")]
     binary_file_path: PathBuf,
 
-    #[structopt(parse(from_os_str))]
-    source_file_paths: Vec<PathBuf>,
+    source_path_globs: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -73,20 +73,31 @@ fn main() -> Result<()> {
     let index = Index::new(&clang, false, false);
 
     let mut potential_leaks: Vec<InformationLeakDescription> = vec![];
-    for file_path in options.source_file_paths {
-        let translation_unit = index
-            .parser(file_path)
-            .visit_implicit_attributes(false)
-            .parse()?;
+    for glob_expressions in options.source_path_globs {
+        if let Ok(paths) = glob(&glob_expressions) {
+            for path in paths {
+                let translation_unit = index
+                    .parser(path?)
+                    .visit_implicit_attributes(false)
+                    .parse()?;
 
-        let string_literals =
-            gather_entities_by_kind(translation_unit.get_entity(), &[EntityKind::StringLiteral]);
+                let string_literals = gather_entities_by_kind(
+                    translation_unit.get_entity(),
+                    &[EntityKind::StringLiteral],
+                );
 
-        potential_leaks.extend(
-            string_literals
-                .into_iter()
-                .filter_map(|literal| literal.try_into().ok()),
-        );
+                potential_leaks.extend(
+                    string_literals
+                        .into_iter()
+                        .filter_map(|literal| literal.try_into().ok()),
+                );
+            }
+        } else {
+            log::warn!(
+                "'{}' is not a valid path or glob expression, ignoring it",
+                glob_expressions
+            );
+        }
     }
     log::debug!("{:#?}", potential_leaks);
 
