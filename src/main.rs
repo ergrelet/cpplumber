@@ -1,3 +1,5 @@
+mod compilation_db;
+
 use std::{
     borrow::Cow,
     fs::File,
@@ -6,11 +8,13 @@ use std::{
     vec,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use clang::{Clang, Entity, EntityKind, Index};
 use glob::glob;
 use structopt::StructOpt;
 use widestring::{encode_utf16, encode_utf32};
+
+use crate::compilation_db::get_file_paths_from_compile_database;
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
@@ -19,6 +23,10 @@ const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 struct CpplumberOptions {
     #[structopt(parse(from_os_str), short, long = "bin")]
     binary_file_path: PathBuf,
+
+    /// Compilation database
+    #[structopt(parse(from_os_str), short, long = "project")]
+    project_file_path: Option<PathBuf>,
 
     source_path_globs: Vec<String>,
 }
@@ -69,35 +77,47 @@ fn main() -> Result<()> {
         ));
     }
 
+    // Parse project file if used
+    let file_paths = if let Some(project_file_path) = options.project_file_path {
+        get_file_paths_from_compile_database(&project_file_path)?
+    } else {
+        // Process glob expressions otherwise
+        let mut file_paths = vec![];
+        for glob_expressions in options.source_path_globs {
+            if let Ok(paths) = glob(&glob_expressions) {
+                for path in paths {
+                    file_paths.push(path?);
+                }
+            } else {
+                log::warn!(
+                    "'{}' is not a valid path or glob expression, ignoring it",
+                    glob_expressions
+                );
+            }
+        }
+
+        file_paths
+    };
+
     let clang = Clang::new().map_err(|e| anyhow!(e))?;
     let index = Index::new(&clang, false, false);
 
     let mut potential_leaks: Vec<InformationLeakDescription> = vec![];
-    for glob_expressions in options.source_path_globs {
-        if let Ok(paths) = glob(&glob_expressions) {
-            for path in paths {
-                let translation_unit = index
-                    .parser(path?)
-                    .visit_implicit_attributes(false)
-                    .parse()?;
+    for path in file_paths {
+        let translation_unit = index
+            .parser(&path)
+            .visit_implicit_attributes(false)
+            .parse()
+            .with_context(|| format!("Failed to parse source file '{}'", path.display()))?;
 
-                let string_literals = gather_entities_by_kind(
-                    translation_unit.get_entity(),
-                    &[EntityKind::StringLiteral],
-                );
+        let string_literals =
+            gather_entities_by_kind(translation_unit.get_entity(), &[EntityKind::StringLiteral]);
 
-                potential_leaks.extend(
-                    string_literals
-                        .into_iter()
-                        .filter_map(|literal| literal.try_into().ok()),
-                );
-            }
-        } else {
-            log::warn!(
-                "'{}' is not a valid path or glob expression, ignoring it",
-                glob_expressions
-            );
-        }
+        potential_leaks.extend(
+            string_literals
+                .into_iter()
+                .filter_map(|literal| literal.try_into().ok()),
+        );
     }
     log::debug!("{:#?}", potential_leaks);
 
@@ -289,11 +309,11 @@ fn check_for_leaks_in_binary_file(
             .position(|window| window == leak.bytes)
         {
             println!(
-                "Leak at offset 0x{:x}: {} [{}:{}]",
-                offset,
-                leak.leaked_information,
+                "[{}:{}]: {} is leaked (offset=0x{:x})",
                 leak.declaration_metadata.0.display(),
-                leak.declaration_metadata.1
+                leak.declaration_metadata.1,
+                leak.leaked_information,
+                offset,
             );
         }
     }
