@@ -1,4 +1,5 @@
 mod compilation_db;
+mod suppressions;
 
 use std::{
     borrow::Cow,
@@ -12,9 +13,12 @@ use anyhow::{anyhow, Context, Result};
 use clang::{Clang, Entity, EntityKind, Index};
 use glob::glob;
 use structopt::StructOpt;
+use suppressions::Suppressions;
 use widestring::{encode_utf16, encode_utf32};
 
-use crate::compilation_db::get_file_paths_from_compile_database;
+use crate::{
+    compilation_db::get_file_paths_from_compile_database, suppressions::parse_suppressions_file,
+};
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
@@ -28,10 +32,13 @@ struct CpplumberOptions {
     #[structopt(parse(from_os_str), short, long = "project")]
     project_file_path: Option<PathBuf>,
 
+    #[structopt(parse(from_os_str), short, long)]
+    suppressions_list: Option<PathBuf>,
+
     source_path_globs: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct InformationLeakDescription {
     /// Leaked information, as represented in the source code
     leaked_information: String,
@@ -77,6 +84,16 @@ fn main() -> Result<()> {
         ));
     }
 
+    // Parse the suppression list if used
+    let suppressions = if let Some(suppressions_list) = options.suppressions_list {
+        Some(
+            parse_suppressions_file(&suppressions_list)
+                .with_context(|| "Failed to parse suppressions list")?,
+        )
+    } else {
+        None
+    };
+
     // Parse project file if used
     let file_paths = if let Some(project_file_path) = options.project_file_path {
         get_file_paths_from_compile_database(&project_file_path)?
@@ -99,9 +116,13 @@ fn main() -> Result<()> {
         file_paths
     };
 
+    // Filter suppressed files
+    let file_paths: Vec<PathBuf> = filter_suppressed_files(file_paths, &suppressions);
+
     let clang = Clang::new().map_err(|e| anyhow!(e))?;
     let index = Index::new(&clang, false, false);
 
+    // Parse source files and extract information that could leak
     let mut potential_leaks: Vec<InformationLeakDescription> = vec![];
     for path in file_paths {
         let translation_unit = index
@@ -119,6 +140,9 @@ fn main() -> Result<()> {
                 .filter_map(|literal| literal.try_into().ok()),
         );
     }
+
+    // Filter suppressed artifacts if needed
+    let potential_leaks = filter_suppressed_artifacts(potential_leaks, &suppressions);
     log::debug!("{:#?}", potential_leaks);
 
     log::info!(
@@ -291,6 +315,45 @@ fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
         Some(Cow::Owned(owned))
     } else {
         Some(Cow::Borrowed(string))
+    }
+}
+
+fn filter_suppressed_files(
+    file_paths: Vec<PathBuf>,
+    suppressions: &Option<Suppressions>,
+) -> Vec<PathBuf> {
+    if let Some(suppressions) = suppressions {
+        file_paths
+            .iter()
+            .filter(|file_path| {
+                if let Some(file_path) = file_path.to_str() {
+                    !suppressions
+                        .files
+                        .iter()
+                        .any(|pattern| pattern.matches(file_path))
+                } else {
+                    true
+                }
+            })
+            .cloned()
+            .collect()
+    } else {
+        file_paths
+    }
+}
+
+fn filter_suppressed_artifacts(
+    potential_leaks: Vec<InformationLeakDescription>,
+    suppressions: &Option<Suppressions>,
+) -> Vec<InformationLeakDescription> {
+    if let Some(suppressions) = suppressions {
+        potential_leaks
+            .iter()
+            .filter(|leak| !suppressions.artifacts.contains(&leak.leaked_information))
+            .cloned()
+            .collect()
+    } else {
+        potential_leaks
     }
 }
 
