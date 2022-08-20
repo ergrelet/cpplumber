@@ -1,8 +1,9 @@
 mod compilation_db;
+mod information_leak;
 mod suppressions;
 
 use std::{
-    borrow::Cow,
+    collections::HashSet,
     fs::File,
     io::Read,
     path::{Path, PathBuf},
@@ -14,10 +15,10 @@ use clang::{Clang, Entity, EntityKind, Index};
 use glob::glob;
 use structopt::StructOpt;
 use suppressions::Suppressions;
-use widestring::{encode_utf16, encode_utf32};
 
 use crate::{
-    compilation_db::get_file_paths_from_compile_database, suppressions::parse_suppressions_file,
+    compilation_db::get_file_paths_from_compile_database,
+    information_leak::InformationLeakDescription, suppressions::parse_suppressions_file,
 };
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
@@ -25,6 +26,7 @@ const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 #[derive(Debug, StructOpt)]
 #[structopt(name = PKG_NAME, about = "An information leak detector for C and C++ code bases")]
 struct CpplumberOptions {
+    /// Path to the output binary to scan for leaked information
     #[structopt(parse(from_os_str), short, long = "bin")]
     binary_file_path: PathBuf,
 
@@ -32,44 +34,17 @@ struct CpplumberOptions {
     #[structopt(parse(from_os_str), short, long = "project")]
     project_file_path: Option<PathBuf>,
 
+    /// Path to a file containing rules to prevent certain errors from being
+    /// generated.
     #[structopt(parse(from_os_str), short, long)]
     suppressions_list: Option<PathBuf>,
 
+    /// Only report leaks once for artifacts used in multiple locations
+    #[structopt(long)]
+    ignore_multiple_declarations: bool,
+
+    /// List of source files to scan for (can be glob expressions)
     source_path_globs: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct InformationLeakDescription {
-    /// Leaked information, as represented in the source code
-    leaked_information: String,
-    /// Byte pattern to match (i.e., leaked information, as represented in the
-    /// binary file)
-    bytes: Vec<u8>,
-    /// Data on where the leaked information is declared in the
-    /// source code (file name, line number)
-    declaration_metadata: (PathBuf, u32),
-}
-
-impl TryFrom<Entity<'_>> for InformationLeakDescription {
-    type Error = ();
-
-    fn try_from(entity: Entity) -> Result<Self, Self::Error> {
-        match entity.get_kind() {
-            EntityKind::StringLiteral => {
-                let leaked_information = entity.get_display_name().unwrap();
-                let location = entity.get_location().unwrap().get_file_location();
-                let file_location = location.file.unwrap().get_path();
-                let line_location = location.line;
-
-                Ok(Self {
-                    bytes: string_literal_to_bytes(&leaked_information),
-                    leaked_information,
-                    declaration_metadata: (file_location, line_location),
-                })
-            }
-            _ => Err(()),
-        }
-    }
 }
 
 fn main() -> Result<()> {
@@ -143,13 +118,22 @@ fn main() -> Result<()> {
 
     // Filter suppressed artifacts if needed
     let potential_leaks = filter_suppressed_artifacts(potential_leaks, &suppressions);
-    log::debug!("{:#?}", potential_leaks);
 
     log::info!(
         "Looking for leaks in '{}'...",
         options.binary_file_path.display()
     );
-    check_for_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?;
+
+    if options.ignore_multiple_declarations {
+        // Remove duplicated artifacts if needed
+        let potential_leaks: HashSet<InformationLeakDescription> =
+            HashSet::from_iter(potential_leaks);
+        log::debug!("{:#?}", potential_leaks);
+        check_for_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?;
+    } else {
+        log::debug!("{:#?}", potential_leaks);
+        check_for_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?;
+    }
 
     Ok(())
 }
@@ -186,136 +170,6 @@ fn gather_entities_by_kind_rec<'tu>(
     }
 
     entities
-}
-
-/// We have to reimplement this ourselves since the `clang` crate doesn't
-/// provide an easy way to get byte representations of `StringLiteral` entities.
-fn string_literal_to_bytes(string_literal: &str) -> Vec<u8> {
-    let mut char_it = string_literal.chars();
-    let first_char = char_it.next();
-    match first_char {
-        None => return vec![],
-        Some(first_char) => match first_char {
-            // Ordinary string (we assume it'll be encoded to ASCII)
-            '"' => process_escape_sequences(&string_literal[1..string_literal.len() - 1])
-                .unwrap()
-                .as_bytes()
-                .to_owned(),
-            // Wide string (we assume it'll be encoded to UTF-16LE)
-            'L' => encode_utf16(
-                process_escape_sequences(&string_literal[2..string_literal.len() - 1])
-                    .unwrap()
-                    .chars(),
-            )
-            .map(u16::to_le_bytes)
-            .fold(Vec::new(), |mut acc: Vec<u8>, e| {
-                acc.extend(e);
-                acc
-            }),
-            // UTF-32 string
-            'U' => encode_utf32(
-                process_escape_sequences(&string_literal[2..string_literal.len() - 1])
-                    .unwrap()
-                    .chars(),
-            )
-            .map(u32::to_le_bytes)
-            .fold(Vec::new(), |mut acc: Vec<u8>, e| {
-                acc.extend(e);
-                acc
-            }),
-            // UTF-8 or UTF-16LE string
-            'u' => {
-                let second_char = char_it.next().unwrap();
-                let third_char = char_it.next().unwrap();
-                if second_char == '8' && third_char == '"' {
-                    // UTF-8
-                    process_escape_sequences(&string_literal[3..string_literal.len() - 1])
-                        .unwrap()
-                        .as_bytes()
-                        .to_owned()
-                } else {
-                    // UTF-16LE
-                    encode_utf16(
-                        process_escape_sequences(&string_literal[2..string_literal.len() - 1])
-                            .unwrap()
-                            .chars(),
-                    )
-                    .map(u16::to_le_bytes)
-                    .fold(Vec::new(), |mut acc: Vec<u8>, e| {
-                        acc.extend(e);
-                        acc
-                    })
-                }
-            }
-            _ => unreachable!("New string literal prefix introduced in the standard?"),
-        },
-    }
-}
-
-fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
-    let mut owned: Option<String> = None;
-    let mut skip_until: usize = 0;
-    for (position, char) in string.chars().enumerate() {
-        if position <= skip_until {
-            continue;
-        }
-
-        if char == '\\' {
-            if owned.is_none() {
-                owned = Some(string[..position].to_owned());
-            }
-            let b = owned.as_mut().unwrap();
-            let mut escape_char_it = string.chars();
-            let first_char = escape_char_it.nth(position + 1);
-            if let Some(first_char) = first_char {
-                skip_until = position + 1;
-                match first_char {
-                    // Simple escape sequences
-                    'a' => b.push('\x07'),
-                    'b' => b.push('\x08'),
-                    't' => b.push('\t'),
-                    'n' => b.push('\n'),
-                    'v' => b.push('\x0b'),
-                    'f' => b.push('\x0c'),
-                    'r' => b.push('\r'),
-                    ' ' => b.push(' '),
-                    '\\' => b.push('\\'),
-                    '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' => {
-                        let start_position = position + 1;
-                        let mut end_position = start_position + 1;
-                        if let Some(second_char) = escape_char_it.next() {
-                            if second_char.is_digit(8) {
-                                end_position += 1;
-                            }
-                        }
-                        if let Some(third_char) = escape_char_it.next() {
-                            if third_char.is_digit(8) {
-                                end_position += 1;
-                            }
-                        }
-
-                        // Octal escape sequence (\nnn)
-                        let octal_value =
-                            u8::from_str_radix(&string[start_position..end_position], 8).unwrap();
-                        // TODO: Fix wrong multibyte transformations in some cases
-                        b.push(octal_value as char);
-                        skip_until = end_position;
-                    }
-                    a => b.push(a),
-                }
-            } else {
-                return None;
-            }
-        } else if let Some(o) = owned.as_mut() {
-            o.push(char);
-        }
-    }
-
-    if let Some(owned) = owned {
-        Some(Cow::Owned(owned))
-    } else {
-        Some(Cow::Borrowed(string))
-    }
 }
 
 fn filter_suppressed_files(
@@ -357,10 +211,13 @@ fn filter_suppressed_artifacts(
     }
 }
 
-fn check_for_leaks_in_binary_file(
+fn check_for_leaks_in_binary_file<'l, LeakDescCollection>(
     binary_file_path: &Path,
-    leak_desc: &[InformationLeakDescription],
-) -> Result<()> {
+    leak_desc: LeakDescCollection,
+) -> Result<()>
+where
+    LeakDescCollection: IntoIterator<Item = &'l InformationLeakDescription>,
+{
     let mut bin_file = File::open(binary_file_path)?;
 
     let mut bin_data = vec![];
