@@ -1,0 +1,21 @@
+name: Tests
+
+on: [push]
+
+jobs:
+  test-latest:
+    name: Test on Linux - Latest
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+      - name: Install libclang-dev
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libclang-10-dev
+        if: runner.os == 'linux'
+      - name: Test
+        run: make test

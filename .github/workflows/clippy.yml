@@ -1,0 +1,22 @@
+name: Clippy
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          components: clippy, rustfmt
+          override: true
+      - name: Install libclang-dev
+        run: sudo apt-get update; sudo apt-get install --no-install-recommends libclang-10-dev
+        if: runner.os == 'linux'
+      - name: Run clippy
+        run: make lint
+

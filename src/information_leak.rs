@@ -101,7 +101,7 @@ fn string_literal_to_bytes(string_literal: &str) -> Vec<u8> {
     let mut char_it = string_literal.chars();
     let first_char = char_it.next();
     match first_char {
-        None => return vec![],
+        None => vec![],
         Some(first_char) => match first_char {
             // Ordinary string (we assume it'll be encoded to ASCII)
             '"' => process_escape_sequences(&string_literal[1..string_literal.len() - 1])
