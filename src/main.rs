@@ -13,12 +13,14 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use clang::{Clang, Entity, EntityKind, Index};
 use glob::glob;
+use information_leak::{BinaryLocation, ConfirmedLeak};
 use structopt::StructOpt;
 use suppressions::Suppressions;
 
 use crate::{
     compilation_db::get_file_paths_from_compile_database,
-    information_leak::InformationLeakDescription, suppressions::parse_suppressions_file,
+    information_leak::{print_confirmed_leaks, PotentialLeak},
+    suppressions::parse_suppressions_file,
 };
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
@@ -42,6 +44,10 @@ struct CpplumberOptions {
     /// Only report leaks once for artifacts used in multiple locations
     #[structopt(long)]
     ignore_multiple_declarations: bool,
+
+    /// Generate output as JSON
+    #[structopt(short, long = "json")]
+    json_output: bool,
 
     /// List of source files to scan for (can be glob expressions)
     source_path_globs: Vec<String>,
@@ -98,7 +104,7 @@ fn main() -> Result<()> {
     let index = Index::new(&clang, false, false);
 
     // Parse source files and extract information that could leak
-    let mut potential_leaks: Vec<InformationLeakDescription> = vec![];
+    let mut potential_leaks: Vec<PotentialLeak> = vec![];
     for path in file_paths {
         let translation_unit = index
             .parser(&path)
@@ -124,16 +130,18 @@ fn main() -> Result<()> {
         options.binary_file_path.display()
     );
 
-    if options.ignore_multiple_declarations {
+    let leaks = if options.ignore_multiple_declarations {
         // Remove duplicated artifacts if needed
-        let potential_leaks: HashSet<InformationLeakDescription> =
-            HashSet::from_iter(potential_leaks);
+        let potential_leaks: HashSet<PotentialLeak> = HashSet::from_iter(potential_leaks);
         log::debug!("{:#?}", potential_leaks);
-        check_for_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?;
+        find_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?
     } else {
         log::debug!("{:#?}", potential_leaks);
-        check_for_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?;
-    }
+        find_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?
+    };
+
+    // Print the result to stdout
+    print_confirmed_leaks(leaks, options.json_output)?;
 
     Ok(())
 }
@@ -197,9 +205,9 @@ fn filter_suppressed_files(
 }
 
 fn filter_suppressed_artifacts(
-    potential_leaks: Vec<InformationLeakDescription>,
+    potential_leaks: Vec<PotentialLeak>,
     suppressions: &Option<Suppressions>,
-) -> Vec<InformationLeakDescription> {
+) -> Vec<PotentialLeak> {
     if let Some(suppressions) = suppressions {
         potential_leaks
             .iter()
@@ -211,32 +219,34 @@ fn filter_suppressed_artifacts(
     }
 }
 
-fn check_for_leaks_in_binary_file<'l, LeakDescCollection>(
+fn find_leaks_in_binary_file<'l, PotentialLeakCollection>(
     binary_file_path: &Path,
-    leak_desc: LeakDescCollection,
-) -> Result<()>
+    leak_desc: PotentialLeakCollection,
+) -> Result<Vec<ConfirmedLeak>>
 where
-    LeakDescCollection: IntoIterator<Item = &'l InformationLeakDescription>,
+    PotentialLeakCollection: IntoIterator<Item = &'l PotentialLeak>,
 {
     let mut bin_file = File::open(binary_file_path)?;
 
     let mut bin_data = vec![];
     bin_file.read_to_end(&mut bin_data)?;
 
-    for leak in leak_desc {
-        if let Some(offset) = bin_data
-            .windows(leak.bytes.len())
-            .position(|window| window == leak.bytes)
-        {
-            println!(
-                "[{}:{}]: {} is leaked (offset=0x{:x})",
-                leak.declaration_metadata.0.display(),
-                leak.declaration_metadata.1,
-                leak.leaked_information,
-                offset,
-            );
-        }
-    }
-
-    Ok(())
+    Ok(leak_desc
+        .into_iter()
+        .filter_map(|leak| {
+            bin_data
+                .windows(leak.bytes.len())
+                .position(|window| window == leak.bytes)
+                .map(|offset| ConfirmedLeak {
+                    leaked_information: leak.leaked_information.clone(),
+                    location: information_leak::LeakLocation {
+                        source: leak.declaration_metadata.clone(),
+                        binary: BinaryLocation {
+                            file: binary_file_path.to_path_buf(),
+                            offset: offset as u64,
+                        },
+                    },
+                })
+        })
+        .collect())
 }

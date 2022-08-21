@@ -1,21 +1,26 @@
 use std::{borrow::Cow, hash::Hash, path::PathBuf};
 
+use anyhow::Result;
 use clang::{Entity, EntityKind};
+use serde::Serialize;
 use widestring::{encode_utf16, encode_utf32};
 
-#[derive(Debug, Clone, Eq)]
-pub struct InformationLeakDescription {
+const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+const REPORT_FORMAT_VERSION: u32 = 1;
+
+#[derive(Debug, Clone)]
+pub struct PotentialLeak {
     /// Leaked information, as represented in the source code
     pub leaked_information: String,
     /// Byte pattern to match (i.e., leaked information, as represented in the
     /// binary file)
     pub bytes: Vec<u8>,
     /// Data on where the leaked information is declared in the
-    /// source code (file name, line number)
-    pub declaration_metadata: (PathBuf, u32),
+    /// source code
+    pub declaration_metadata: SourceLocation,
 }
 
-impl TryFrom<Entity<'_>> for InformationLeakDescription {
+impl TryFrom<Entity<'_>> for PotentialLeak {
     type Error = ();
 
     fn try_from(entity: Entity) -> Result<Self, Self::Error> {
@@ -29,7 +34,10 @@ impl TryFrom<Entity<'_>> for InformationLeakDescription {
                 Ok(Self {
                     bytes: string_literal_to_bytes(&leaked_information),
                     leaked_information,
-                    declaration_metadata: (file_location, line_location),
+                    declaration_metadata: SourceLocation {
+                        file: file_location,
+                        line: line_location as u64,
+                    },
                 })
             }
             _ => Err(()),
@@ -37,16 +45,54 @@ impl TryFrom<Entity<'_>> for InformationLeakDescription {
     }
 }
 
-impl PartialEq for InformationLeakDescription {
+impl PartialEq for PotentialLeak {
     fn eq(&self, other: &Self) -> bool {
         self.leaked_information == other.leaked_information
     }
 }
 
-impl Hash for InformationLeakDescription {
+impl Eq for PotentialLeak {}
+
+impl Hash for PotentialLeak {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.leaked_information.hash(state);
     }
+}
+
+#[derive(Serialize)]
+pub struct ConfirmedLeak {
+    pub leaked_information: String,
+    pub location: LeakLocation,
+}
+
+#[derive(Serialize)]
+pub struct LeakLocation {
+    pub source: SourceLocation,
+    pub binary: BinaryLocation,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SourceLocation {
+    pub file: PathBuf,
+    pub line: u64,
+}
+
+#[derive(Serialize)]
+pub struct BinaryLocation {
+    pub file: PathBuf,
+    pub offset: u64,
+}
+
+#[derive(Serialize)]
+struct JsonReport {
+    version: ReportVersion,
+    leaks: Vec<ConfirmedLeak>,
+}
+
+#[derive(Serialize)]
+struct ReportVersion {
+    executable: String,
+    format: u32,
 }
 
 /// We have to reimplement this ourselves since the `clang` crate doesn't
@@ -177,4 +223,30 @@ fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
     } else {
         Some(Cow::Borrowed(string))
     }
+}
+
+pub fn print_confirmed_leaks(confirmed_leaks: Vec<ConfirmedLeak>, json: bool) -> Result<()> {
+    if json {
+        let report = JsonReport {
+            version: ReportVersion {
+                executable: PKG_VERSION.into(),
+                format: REPORT_FORMAT_VERSION,
+            },
+            leaks: confirmed_leaks,
+        };
+        serde_json::to_writer(std::io::stdout(), &report)?;
+    } else {
+        for leak in confirmed_leaks {
+            println!(
+                "[{}:{}]: {} leaked at {}+0x{:x}",
+                leak.location.source.file.display(),
+                leak.location.source.line,
+                leak.leaked_information,
+                leak.location.binary.file.display(),
+                leak.location.binary.offset,
+            );
+        }
+    }
+
+    Ok(())
 }
