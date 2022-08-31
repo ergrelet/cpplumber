@@ -1,4 +1,4 @@
-mod compilation_db;
+mod compilation_database;
 mod information_leak;
 mod suppressions;
 
@@ -12,13 +12,14 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use clang::{Clang, Entity, EntityKind, Index};
+use compilation_database::CompileCommands;
 use glob::glob;
 use information_leak::{BinaryLocation, ConfirmedLeak};
 use structopt::StructOpt;
 use suppressions::Suppressions;
 
 use crate::{
-    compilation_db::get_file_paths_from_compile_database,
+    compilation_database::{CompilationDatabase, CompileCommandsDatabase, FileListDatabase},
     information_leak::{print_confirmed_leaks, PotentialLeak},
     suppressions::parse_suppressions_file,
 };
@@ -66,61 +67,24 @@ fn main() -> Result<()> {
     }
 
     // Parse the suppression list if used
-    let suppressions = if let Some(suppressions_list) = options.suppressions_list {
+    let suppressions = if let Some(ref suppressions_list) = options.suppressions_list {
         Some(
-            parse_suppressions_file(&suppressions_list)
+            parse_suppressions_file(suppressions_list)
                 .with_context(|| "Failed to parse suppressions list")?,
         )
     } else {
         None
     };
 
-    // Parse project file if used
-    let file_paths = if let Some(project_file_path) = options.project_file_path {
-        get_file_paths_from_compile_database(&project_file_path)?
-    } else {
-        // Process glob expressions otherwise
-        let mut file_paths = vec![];
-        for glob_expressions in options.source_path_globs {
-            if let Ok(paths) = glob(&glob_expressions) {
-                for path in paths {
-                    file_paths.push(path?);
-                }
-            } else {
-                log::warn!(
-                    "'{}' is not a valid path or glob expression, ignoring it",
-                    glob_expressions
-                );
-            }
-        }
-
-        file_paths
-    };
+    // Parse project file or process glob expressions
+    let compilation_db = generate_compilation_database(&options)?;
 
     // Filter suppressed files
-    let file_paths: Vec<PathBuf> = filter_suppressed_files(file_paths, &suppressions);
-
-    let clang = Clang::new().map_err(|e| anyhow!(e))?;
-    let index = Index::new(&clang, false, false);
+    let compile_commands =
+        filter_suppressed_files(compilation_db.get_all_compile_commands(), &suppressions);
 
     // Parse source files and extract information that could leak
-    let mut potential_leaks: Vec<PotentialLeak> = vec![];
-    for path in file_paths {
-        let translation_unit = index
-            .parser(&path)
-            .visit_implicit_attributes(false)
-            .parse()
-            .with_context(|| format!("Failed to parse source file '{}'", path.display()))?;
-
-        let string_literals =
-            gather_entities_by_kind(translation_unit.get_entity(), &[EntityKind::StringLiteral]);
-
-        potential_leaks.extend(
-            string_literals
-                .into_iter()
-                .filter_map(|literal| literal.try_into().ok()),
-        );
-    }
+    let potential_leaks = extract_artifacts_from_source_files(compile_commands)?;
 
     // Filter suppressed artifacts if needed
     let potential_leaks = filter_suppressed_artifacts(potential_leaks, &suppressions);
@@ -180,14 +144,43 @@ fn gather_entities_by_kind_rec<'tu>(
     entities
 }
 
+fn generate_compilation_database(
+    options: &CpplumberOptions,
+) -> Result<Box<dyn CompilationDatabase>> {
+    if let Some(ref project_file_path) = options.project_file_path {
+        // Parse compile commands from the JSON database
+        Ok(Box::new(CompileCommandsDatabase::new(project_file_path)?))
+    } else {
+        // Otherwise, process glob expressions
+        let mut file_paths = vec![];
+        for glob_expressions in options.source_path_globs.iter() {
+            if let Ok(paths) = glob(glob_expressions) {
+                for path in paths {
+                    file_paths.push(path?);
+                }
+            } else {
+                log::warn!(
+                    "'{}' is not a valid path or glob expression, ignoring it",
+                    glob_expressions
+                );
+            }
+        }
+
+        // TODO: Generate `arguments` from the CLI
+        let arguments = vec![];
+        Ok(Box::new(FileListDatabase::new(&file_paths, arguments)))
+    }
+}
+
 fn filter_suppressed_files(
-    file_paths: Vec<PathBuf>,
+    compile_cmds: CompileCommands,
     suppressions: &Option<Suppressions>,
-) -> Vec<PathBuf> {
+) -> CompileCommands {
     if let Some(suppressions) = suppressions {
-        file_paths
-            .iter()
-            .filter(|file_path| {
+        compile_cmds
+            .into_iter()
+            .filter(|compile_cmd| {
+                let file_path = compile_cmd.directory.join(&compile_cmd.filename);
                 if let Some(file_path) = file_path.to_str() {
                     !suppressions
                         .files
@@ -197,11 +190,40 @@ fn filter_suppressed_files(
                     true
                 }
             })
-            .cloned()
             .collect()
     } else {
-        file_paths
+        compile_cmds
     }
+}
+
+fn extract_artifacts_from_source_files(
+    compile_commands: CompileCommands,
+) -> Result<Vec<PotentialLeak>> {
+    // Prepare atheclang index
+    let clang = Clang::new().map_err(|e| anyhow!(e))?;
+    let index = Index::new(&clang, false, false);
+
+    // Populate index by parsing source files
+    let mut potential_leaks: Vec<PotentialLeak> = vec![];
+    for compile_cmd in compile_commands {
+        let file_path = compile_cmd.directory.join(compile_cmd.filename);
+        let translation_unit = index
+            .parser(&file_path)
+            .arguments(&compile_cmd.arguments)
+            .parse()
+            .with_context(|| format!("Failed to parse source file '{}'", file_path.display()))?;
+
+        let string_literals =
+            gather_entities_by_kind(translation_unit.get_entity(), &[EntityKind::StringLiteral]);
+
+        potential_leaks.extend(
+            string_literals
+                .into_iter()
+                .filter_map(|literal| literal.try_into().ok()),
+        );
+    }
+
+    Ok(potential_leaks)
 }
 
 fn filter_suppressed_artifacts(
@@ -210,9 +232,8 @@ fn filter_suppressed_artifacts(
 ) -> Vec<PotentialLeak> {
     if let Some(suppressions) = suppressions {
         potential_leaks
-            .iter()
+            .into_iter()
             .filter(|leak| !suppressions.artifacts.contains(&leak.leaked_information))
-            .cloned()
             .collect()
     } else {
         potential_leaks
