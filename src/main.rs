@@ -29,11 +29,21 @@ const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 #[derive(Debug, StructOpt)]
 #[structopt(name = PKG_NAME, about = "An information leak detector for C and C++ code bases")]
 struct CpplumberOptions {
-    /// Path to the output binary to scan for leaked information
+    /// Path to the output binary to scan for leaked information.
     #[structopt(parse(from_os_str), short, long = "bin")]
     binary_file_path: PathBuf,
 
-    /// Compilation database
+    /// Additional include directories.
+    /// Only used when project files aren't used.
+    #[structopt(short = "I")]
+    include_directories: Vec<String>,
+
+    /// Additional preprocessor definitions.
+    /// Only used when project files aren't used.
+    #[structopt(short = "D")]
+    compile_definitions: Vec<String>,
+
+    /// Compilation database.
     #[structopt(parse(from_os_str), short, long = "project")]
     project_file_path: Option<PathBuf>,
 
@@ -42,15 +52,15 @@ struct CpplumberOptions {
     #[structopt(parse(from_os_str), short, long)]
     suppressions_list: Option<PathBuf>,
 
-    /// Only report leaks once for artifacts used in multiple locations
+    /// Only report leaks once for artifacts declared in multiple locations.
     #[structopt(long)]
     ignore_multiple_declarations: bool,
 
-    /// Generate output as JSON
+    /// Generate output as JSON.
     #[structopt(short, long = "json")]
     json_output: bool,
 
-    /// List of source files to scan for (can be glob expressions)
+    /// List of source files to scan for (can be glob expressions).
     source_path_globs: Vec<String>,
 }
 
@@ -166,8 +176,19 @@ fn generate_compilation_database(
             }
         }
 
-        // TODO: Generate `arguments` from the CLI
-        let arguments = vec![];
+        // Generate `arguments` from the CLI arguments
+        let mut arguments = vec![];
+
+        // Add include directories to the list of arguments
+        for include_dir in options.include_directories.iter() {
+            arguments.push(format!("-I{}", include_dir));
+        }
+        // Add preprocessor defitions to the list of arguments
+        for compile_def in options.compile_definitions.iter() {
+            arguments.push(format!("-D{}", compile_def));
+        }
+
+        log::debug!("Using arguments: {:?}", arguments);
         Ok(Box::new(FileListDatabase::new(&file_paths, arguments)))
     }
 }
