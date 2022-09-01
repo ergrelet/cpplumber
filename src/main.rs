@@ -78,6 +78,7 @@ fn main() -> Result<()> {
 
     // Parse the suppression list if used
     let suppressions = if let Some(ref suppressions_list) = options.suppressions_list {
+        log::info!("Parsing suppressions file...");
         Some(
             parse_suppressions_file(suppressions_list)
                 .with_context(|| "Failed to parse suppressions list")?,
@@ -86,16 +87,20 @@ fn main() -> Result<()> {
         None
     };
 
+    log::info!("Gathering source files...");
     // Parse project file or process glob expressions
     let compilation_db = generate_compilation_database(&options)?;
 
+    log::info!("Filtering suppressed files...");
     // Filter suppressed files
     let compile_commands =
         filter_suppressed_files(compilation_db.get_all_compile_commands(), &suppressions);
 
+    log::info!("Extracting artifacts from source files...");
     // Parse source files and extract information that could leak
     let potential_leaks = extract_artifacts_from_source_files(compile_commands)?;
 
+    log::info!("Filtering suppressed artifacts...");
     // Filter suppressed artifacts if needed
     let potential_leaks = filter_suppressed_artifacts(potential_leaks, &suppressions);
 
@@ -103,7 +108,6 @@ fn main() -> Result<()> {
         "Looking for leaks in '{}'...",
         options.binary_file_path.display()
     );
-
     let leaks = if options.ignore_multiple_declarations {
         // Remove duplicated artifacts if needed
         let potential_leaks: HashSet<PotentialLeak> = HashSet::from_iter(potential_leaks);
@@ -113,6 +117,7 @@ fn main() -> Result<()> {
         log::debug!("{:#?}", potential_leaks);
         find_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?
     };
+    log::debug!("Done!");
 
     // Print the result to stdout
     print_confirmed_leaks(leaks, options.json_output)?;
