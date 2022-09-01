@@ -1,0 +1,10 @@
+# Files to ignore (can include glob expressions)
+files:
+  # Duplicated file
+  - "*\\file2.cc"
+
+# Artifacts to ignore
+artifacts:
+  # This leak is not too bad
+  - "\"c_string\""
+  - "U\"utf32_string\""

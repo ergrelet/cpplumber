@@ -1,0 +1,20 @@
+[
+  {
+    "directory": "C:\\Users\\user\\Documents\\cpplumber",
+    "arguments": [
+      "/usr/bin/clang++",
+      "-Irelative",
+      "-DSOMEDEF=With spaces, quotes.",
+      "-c",
+      "-o",
+      "file.o",
+      "file.cc"
+    ],
+    "file": "file.cc"
+  },
+  {
+    "directory": "C:\\Users\\user\\Documents\\cpplumber",
+    "command": "/usr/bin/clang++ -Irelative -DSOMEDEF=\"With spaces, quotes.\" -c -o file2.o file2.cc",
+    "file": "file2.cc"
+  }
+]

@@ -260,3 +260,89 @@ pub fn print_confirmed_leaks(confirmed_leaks: Vec<ConfirmedLeak>, json: bool) ->
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn string_literal_to_bytes_empty_string() {
+        assert!(string_literal_to_bytes("")
+            .expect("string_literal_to_bytes failed")
+            .is_empty());
+    }
+
+    #[test]
+    fn string_literal_to_bytes_not_a_literal() {
+        assert!(string_literal_to_bytes("not a literal").is_err());
+    }
+
+    #[test]
+    fn string_literal_to_bytes_ascii_string_literal() {
+        assert_eq!(
+            string_literal_to_bytes("\"hello\"").expect("string_literal_to_bytes failed"),
+            b"hello"
+        );
+    }
+
+    #[test]
+    fn string_literal_to_bytes_wide_string_literal() {
+        assert_eq!(
+            string_literal_to_bytes("L\"hello\"").expect("string_literal_to_bytes failed"),
+            b"h\0e\0l\0l\0o\0"
+        );
+    }
+
+    #[test]
+    fn string_literal_to_bytes_utf8_string_literal() {
+        assert_eq!(
+            string_literal_to_bytes("u8\"hello\"").expect("string_literal_to_bytes failed"),
+            b"hello"
+        );
+    }
+
+    #[test]
+    fn string_literal_to_bytes_utf16_string_literal() {
+        assert_eq!(
+            string_literal_to_bytes("u\"hello\"").expect("string_literal_to_bytes failed"),
+            b"h\0e\0l\0l\0o\0"
+        );
+    }
+
+    #[test]
+    fn string_literal_to_bytes_utf32_string_literal() {
+        assert_eq!(
+            string_literal_to_bytes("U\"hello\"").expect("string_literal_to_bytes failed"),
+            b"h\0\0\0e\0\0\0l\0\0\0l\0\0\0o\0\0\0"
+        );
+    }
+
+    #[test]
+    fn process_escape_sequences_no_escape_sequence() {
+        assert_eq!(
+            process_escape_sequences("hello world!").expect("Failed to escape string"),
+            "hello world!"
+        );
+    }
+
+    #[test]
+    fn process_escape_sequences_invalid_escape_sequence() {
+        assert!(process_escape_sequences(r"invalid\").is_none());
+    }
+
+    #[test]
+    fn process_escape_sequences_char_escape_sequences() {
+        assert_eq!(
+            process_escape_sequences(r"\a\b\t\n\v\f\r\ \\").expect("Failed to escape string"),
+            "\x07\x08\t\n\x0B\x0C\r \\"
+        );
+    }
+
+    #[test]
+    fn process_escape_sequences_octal_escape_sequences() {
+        assert_eq!(
+            process_escape_sequences(r"\0\1\2\3\4\5\6\7\10\100").expect("Failed to escape string"),
+            "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x40"
+        );
+    }
+}

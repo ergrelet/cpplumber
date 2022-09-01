@@ -46,3 +46,31 @@ pub fn parse_suppressions_file(suppression_file_path: &Path) -> Result<Suppressi
         artifacts: suppressions_yaml.artifacts.unwrap_or_default(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    const FILE1_PATH: &str = "tests/data/suppressions/files_and_artifacts.yml";
+
+    #[test]
+    fn parse_suppressions_file_files_and_artifacts() {
+        let file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE1_PATH);
+        let suppressions =
+            parse_suppressions_file(&file_path).expect("Failed parsing suppressions file");
+
+        // Files
+        assert_eq!(suppressions.files.len(), 1);
+        assert_eq!(
+            suppressions.files[0],
+            glob::Pattern::new("*\\file2.cc").unwrap()
+        );
+
+        // Artifacts
+        assert_eq!(suppressions.artifacts.len(), 2);
+        assert_eq!(suppressions.artifacts[0], "\"c_string\"");
+        assert_eq!(suppressions.artifacts[1], "U\"utf32_string\"");
+    }
+}

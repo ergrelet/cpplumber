@@ -6,6 +6,7 @@ use std::{path::PathBuf, rc::Rc};
 pub use compile_commands::CompileCommandsDatabase;
 pub use file_list::FileListDatabase;
 
+#[derive(Debug)]
 pub struct CompileCommand {
     pub directory: PathBuf,
     pub filename: PathBuf,

@@ -240,7 +240,7 @@ fn extract_artifacts_from_source_files(
     compile_commands: CompileCommands,
     ignore_system_headers: bool,
 ) -> Result<Vec<PotentialLeak>> {
-    // Prepare atheclang index
+    // Prepare the clang index
     let clang = Clang::new().map_err(|e| anyhow!(e))?;
     let index = Index::new(&clang, false, false);
 
@@ -314,4 +314,58 @@ where
                 })
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FILE_LIST_PROJ_PATH: &str = "tests/data/main/file_list_proj";
+
+    #[test]
+    fn extract_artifacts_from_source_files_file_list() {
+        let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
+        let file_list_db = FileListDatabase::new(
+            &[
+                root_dir_path.join("main.cc"),
+                root_dir_path.join("header.h"),
+            ],
+            vec!["-DDEF_TEST".to_string()],
+        );
+        let potential_leaks =
+            extract_artifacts_from_source_files(file_list_db.get_all_compile_commands(), true)
+                .expect("extract_artifacts_from_source_files failed");
+
+        let expected_string_literals = vec![
+            // header.h
+            "\"included_string_literal\"",
+            // main.cc
+            "\"included_string_literal\"",
+            "\"c_string\"",
+            "u8\"utf8_string\"",
+            "L\"wide_string\"",
+            "u\"utf16_string\"",
+            "U\"utf32_string\"",
+            "\"raw_string\"",
+            "u8\"raw_utf8_string\"",
+            "L\"wide_raw_string\"",
+            "u\"raw_utf16_string\"",
+            "U\"raw_utf32_string\"",
+            "\"def_test\"",
+            "\"concatenated_string\"",
+            r#""multiline\nstring""#,
+            r#""'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202""#,
+            r#""%s\n""#,
+            "\"preprocessor_string_literal\"",
+            r#"L"%s\n""#,
+            "L\"preprocessor_string_literal\"",
+            r#""%s\n""#,
+        ];
+        assert_eq!(expected_string_literals.len(), potential_leaks.len());
+        // Check extracted string literals
+        assert!(potential_leaks.iter().enumerate().all(|(i, leak)| {
+            println!("{:?}", leak.leaked_information);
+            leak.leaked_information == expected_string_literals[i]
+        }));
+    }
 }
