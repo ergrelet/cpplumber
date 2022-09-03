@@ -21,17 +21,6 @@ impl CompileCommandsDatabase {
 }
 
 impl CompilationDatabase for CompileCommandsDatabase {
-    fn get_compile_commands(&self, file_path: &Path) -> Result<CompileCommands> {
-        let clang_cmds = self.clang_db.get_compile_commands(file_path).map_err(|_| {
-            anyhow!(format!(
-                "Failed to get compile commands for {}",
-                file_path.display()
-            ))
-        })?;
-
-        Ok(convert_clang_compile_commands(clang_cmds))
-    }
-
     fn get_all_compile_commands(&self) -> CompileCommands {
         let clang_cmds = self.clang_db.get_all_compile_commands();
 

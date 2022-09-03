@@ -1,10 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use std::path::Path;
 use std::rc::Rc;
-
-use anyhow::{anyhow, Result};
 
 use super::{CompilationDatabase, CompileCommand, CompileCommands};
 
@@ -25,18 +22,6 @@ impl FileListDatabase {
 }
 
 impl CompilationDatabase for FileListDatabase {
-    fn get_compile_commands(&self, file_path: &Path) -> Result<CompileCommands> {
-        if self.file_paths.contains(file_path) {
-            Ok(vec![CompileCommand {
-                directory: file_path.parent().unwrap().to_owned(),
-                filename: file_path.file_name().unwrap().into(),
-                arguments: self.arguments.clone(),
-            }])
-        } else {
-            Err(anyhow!("File not found in the database"))
-        }
-    }
-
     fn get_all_compile_commands(&self) -> CompileCommands {
         self.file_paths
             .iter()
