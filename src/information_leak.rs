@@ -173,7 +173,7 @@ fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
     let mut owned: Option<String> = None;
     let mut skip_until: usize = 0;
     for (position, char) in string.chars().enumerate() {
-        if position <= skip_until {
+        if position < skip_until {
             continue;
         }
 
@@ -181,11 +181,11 @@ fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
             if owned.is_none() {
                 owned = Some(string[..position].to_owned());
             }
-            let b = owned.as_mut().unwrap();
+            let b = owned.as_mut()?;
             let mut escape_char_it = string.chars();
             let first_char = escape_char_it.nth(position + 1);
             if let Some(first_char) = first_char {
-                skip_until = position + 1;
+                skip_until = position + 2;
                 match first_char {
                     // Simple escape sequences
                     'a' => b.push('\x07'),
@@ -195,25 +195,25 @@ fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
                     'v' => b.push('\x0b'),
                     'f' => b.push('\x0c'),
                     'r' => b.push('\r'),
-                    ' ' => b.push(' '),
-                    '\\' => b.push('\\'),
                     '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' => {
                         let start_position = position + 1;
                         let mut end_position = start_position + 1;
+                        // Check following char
                         if let Some(second_char) = escape_char_it.next() {
                             if second_char.is_digit(8) {
                                 end_position += 1;
-                            }
-                        }
-                        if let Some(third_char) = escape_char_it.next() {
-                            if third_char.is_digit(8) {
-                                end_position += 1;
+                                // Check the next char
+                                if let Some(third_char) = escape_char_it.next() {
+                                    if third_char.is_digit(8) {
+                                        end_position += 1;
+                                    }
+                                }
                             }
                         }
 
                         // Octal escape sequence (\nnn)
                         let octal_value =
-                            u8::from_str_radix(&string[start_position..end_position], 8).unwrap();
+                            u8::from_str_radix(&string[start_position..end_position], 8).ok()?;
                         // TODO: Fix wrong multibyte transformations in some cases
                         b.push(octal_value as char);
                         skip_until = end_position;
