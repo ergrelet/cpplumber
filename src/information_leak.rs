@@ -1,6 +1,6 @@
 use std::{borrow::Cow, hash::Hash, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clang::{Entity, EntityKind};
 use serde::Serialize;
 use widestring::{encode_utf16, encode_utf32};
@@ -21,7 +21,7 @@ pub struct PotentialLeak {
 }
 
 impl TryFrom<Entity<'_>> for PotentialLeak {
-    type Error = ();
+    type Error = anyhow::Error;
 
     fn try_from(entity: Entity) -> Result<Self, Self::Error> {
         match entity.get_kind() {
@@ -32,7 +32,7 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
                 let line_location = location.line;
 
                 Ok(Self {
-                    bytes: string_literal_to_bytes(&leaked_information),
+                    bytes: string_literal_to_bytes(&leaked_information)?,
                     leaked_information,
                     declaration_metadata: SourceLocation {
                         file: file_location,
@@ -40,7 +40,7 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
                     },
                 })
             }
-            _ => Err(()),
+            _ => Err(anyhow!("Unsupported entity kind")),
         }
     }
 }
@@ -97,64 +97,74 @@ struct ReportVersion {
 
 /// We have to reimplement this ourselves since the `clang` crate doesn't
 /// provide an easy way to get byte representations of `StringLiteral` entities.
-fn string_literal_to_bytes(string_literal: &str) -> Vec<u8> {
+fn string_literal_to_bytes(string_literal: &str) -> Result<Vec<u8>> {
     let mut char_it = string_literal.chars();
     let first_char = char_it.next();
     match first_char {
-        None => vec![],
+        None => Ok(vec![]),
         Some(first_char) => match first_char {
             // Ordinary string (we assume it'll be encoded to ASCII)
-            '"' => process_escape_sequences(&string_literal[1..string_literal.len() - 1])
-                .unwrap()
-                .as_bytes()
-                .to_owned(),
+            '"' => Ok(
+                process_escape_sequences(&string_literal[1..string_literal.len() - 1])
+                    .ok_or_else(|| anyhow!("Failed to process escape sequences"))?
+                    .as_bytes()
+                    .to_owned(),
+            ),
             // Wide string (we assume it'll be encoded to UTF-16LE)
-            'L' => encode_utf16(
+            'L' => Ok(encode_utf16(
                 process_escape_sequences(&string_literal[2..string_literal.len() - 1])
-                    .unwrap()
+                    .ok_or_else(|| anyhow!("Failed to process escape sequences"))?
                     .chars(),
             )
             .map(u16::to_le_bytes)
             .fold(Vec::new(), |mut acc: Vec<u8>, e| {
                 acc.extend(e);
                 acc
-            }),
+            })),
             // UTF-32 string
-            'U' => encode_utf32(
+            'U' => Ok(encode_utf32(
                 process_escape_sequences(&string_literal[2..string_literal.len() - 1])
-                    .unwrap()
+                    .ok_or_else(|| anyhow!("Failed to process escape sequences"))?
                     .chars(),
             )
             .map(u32::to_le_bytes)
             .fold(Vec::new(), |mut acc: Vec<u8>, e| {
                 acc.extend(e);
                 acc
-            }),
+            })),
             // UTF-8 or UTF-16LE string
             'u' => {
-                let second_char = char_it.next().unwrap();
-                let third_char = char_it.next().unwrap();
+                let second_char = char_it
+                    .next()
+                    .ok_or_else(|| anyhow!("Invalid string literal"))?;
+                let third_char = char_it
+                    .next()
+                    .ok_or_else(|| anyhow!("Invalid string literal"))?;
                 if second_char == '8' && third_char == '"' {
                     // UTF-8
-                    process_escape_sequences(&string_literal[3..string_literal.len() - 1])
-                        .unwrap()
-                        .as_bytes()
-                        .to_owned()
+                    Ok(
+                        process_escape_sequences(&string_literal[3..string_literal.len() - 1])
+                            .ok_or_else(|| anyhow!("Failed to process escape sequences"))?
+                            .as_bytes()
+                            .to_owned(),
+                    )
                 } else {
                     // UTF-16LE
-                    encode_utf16(
+                    Ok(encode_utf16(
                         process_escape_sequences(&string_literal[2..string_literal.len() - 1])
-                            .unwrap()
+                            .ok_or_else(|| anyhow!("Failed to process escape sequences"))?
                             .chars(),
                     )
                     .map(u16::to_le_bytes)
                     .fold(Vec::new(), |mut acc: Vec<u8>, e| {
                         acc.extend(e);
                         acc
-                    })
+                    }))
                 }
             }
-            _ => unreachable!("New string literal prefix introduced in the standard?"),
+            _ => Err(anyhow!(
+                "Invalid string literal or a new string literal prefix introduced in the standard."
+            )),
         },
     }
 }
