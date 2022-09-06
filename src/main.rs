@@ -56,6 +56,10 @@ struct CpplumberOptions {
     #[structopt(long)]
     ignore_multiple_declarations: bool,
 
+    /// Report leaks for data declared in system headers
+    #[structopt(long)]
+    report_system_headers: bool,
+
     /// Generate output as JSON.
     #[structopt(short, long = "json")]
     json_output: bool,
@@ -98,7 +102,8 @@ fn main() -> Result<()> {
 
     log::info!("Extracting artifacts from source files...");
     // Parse source files and extract information that could leak
-    let potential_leaks = extract_artifacts_from_source_files(compile_commands)?;
+    let potential_leaks =
+        extract_artifacts_from_source_files(compile_commands, options.report_system_headers)?;
 
     log::info!("Filtering suppressed artifacts...");
     // Filter suppressed artifacts if needed
@@ -128,18 +133,21 @@ fn main() -> Result<()> {
 fn gather_entities_by_kind<'tu>(
     root_entity: Entity<'tu>,
     entity_kind_filter: &[EntityKind],
+    ignore_system_headers: bool,
 ) -> Vec<Entity<'tu>> {
-    gather_entities_by_kind_rec(root_entity, entity_kind_filter, 0)
+    gather_entities_by_kind_rec(root_entity, entity_kind_filter, ignore_system_headers, 0)
 }
 
 fn gather_entities_by_kind_rec<'tu>(
     root_entity: Entity<'tu>,
     entity_kind_filter: &[EntityKind],
+    ignore_system_headers: bool,
     current_depth: usize,
 ) -> Vec<Entity<'tu>> {
     let mut entities = vec![];
 
     let root_entity_kind = root_entity.get_kind();
+    // Check the if entity's kind is one we're looking for
     if entity_kind_filter
         .iter()
         .any(|elem| elem == &root_entity_kind)
@@ -148,12 +156,18 @@ fn gather_entities_by_kind_rec<'tu>(
     }
 
     for child in root_entity.get_children() {
-        // We're only interested in declarations made in the main files
-        if child.is_in_main_file() {
-            let entities_sub =
-                gather_entities_by_kind_rec(child, entity_kind_filter, current_depth + 1);
-            entities.extend(entities_sub);
+        // Ignore entity if requested
+        if ignore_system_headers && child.is_in_system_header() {
+            continue;
         }
+
+        let entities_sub = gather_entities_by_kind_rec(
+            child,
+            entity_kind_filter,
+            ignore_system_headers,
+            current_depth + 1,
+        );
+        entities.extend(entities_sub);
     }
 
     entities
@@ -224,6 +238,7 @@ fn filter_suppressed_files(
 
 fn extract_artifacts_from_source_files(
     compile_commands: CompileCommands,
+    ignore_system_headers: bool,
 ) -> Result<Vec<PotentialLeak>> {
     // Prepare atheclang index
     let clang = Clang::new().map_err(|e| anyhow!(e))?;
@@ -239,8 +254,11 @@ fn extract_artifacts_from_source_files(
             .parse()
             .with_context(|| format!("Failed to parse source file '{}'", file_path.display()))?;
 
-        let string_literals =
-            gather_entities_by_kind(translation_unit.get_entity(), &[EntityKind::StringLiteral]);
+        let string_literals = gather_entities_by_kind(
+            translation_unit.get_entity(),
+            &[EntityKind::StringLiteral],
+            ignore_system_headers,
+        );
 
         potential_leaks.extend(
             string_literals
