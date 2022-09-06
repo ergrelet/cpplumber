@@ -1,7 +1,5 @@
-use std::collections::BTreeSet;
 use std::path::PathBuf;
-
-use std::rc::Rc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use super::{CompilationDatabase, CompileCommand, CompileCommands};
 
@@ -9,14 +7,14 @@ pub struct FileListDatabase {
     /// Set of file paths
     file_paths: BTreeSet<PathBuf>,
     /// Shared arguments for all files
-    arguments: Rc<Vec<String>>,
+    arguments: Arc<Vec<String>>,
 }
 
 impl FileListDatabase {
     pub fn new(file_paths: &[PathBuf], arguments: Vec<String>) -> Self {
         Self {
             file_paths: BTreeSet::from_iter(file_paths.iter().cloned()),
-            arguments: Rc::new(arguments),
+            arguments: Arc::new(arguments),
         }
     }
 }

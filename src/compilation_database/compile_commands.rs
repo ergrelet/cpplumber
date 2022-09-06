@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::{fs, rc::Rc};
+use std::{fs, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use tempfile::TempDir;
@@ -46,7 +46,7 @@ fn convert_clang_compile_commands(clang_cmds: clang::CompileCommands) -> Compile
             CompileCommand {
                 directory: cmd.get_directory(),
                 filename: cmd.get_filename(),
-                arguments: Rc::new(arguments),
+                arguments: Arc::new(arguments),
             }
         })
         .collect()

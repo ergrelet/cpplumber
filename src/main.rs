@@ -15,6 +15,7 @@ use clang::{Clang, Entity, EntityKind, Index};
 use compilation_database::CompileCommands;
 use glob::glob;
 use information_leak::{BinaryLocation, ConfirmedLeak};
+use rayon::prelude::*;
 use structopt::StructOpt;
 use suppressions::Suppressions;
 
@@ -181,19 +182,30 @@ fn generate_compilation_database(
         Ok(Box::new(CompileCommandsDatabase::new(project_file_path)?))
     } else {
         // Otherwise, process glob expressions
-        let mut file_paths = vec![];
-        for glob_expressions in options.source_path_globs.iter() {
-            if let Ok(paths) = glob(glob_expressions) {
-                for path in paths {
-                    file_paths.push(path?);
-                }
-            } else {
-                log::warn!(
-                    "'{}' is not a valid path or glob expression, ignoring it",
-                    glob_expressions
-                );
-            }
-        }
+        let file_paths = options
+            .source_path_globs
+            .par_iter()
+            .try_fold(
+                Vec::new,
+                |mut accum, glob_expression| -> Result<Vec<PathBuf>> {
+                    if let Ok(paths) = glob(glob_expression) {
+                        for path in paths {
+                            accum.push(path?);
+                        }
+                    } else {
+                        log::warn!(
+                            "'{}' is not a valid path or glob expression, ignoring it",
+                            glob_expression
+                        );
+                    }
+
+                    Ok(accum)
+                },
+            )
+            .try_reduce(Vec::new, |mut accum, mut other| {
+                accum.append(&mut other);
+                Ok(accum)
+            })?;
 
         // Generate `arguments` from the CLI arguments
         let mut arguments = vec![];
@@ -218,13 +230,13 @@ fn filter_suppressed_files(
 ) -> CompileCommands {
     if let Some(suppressions) = suppressions {
         compile_cmds
-            .into_iter()
+            .into_par_iter()
             .filter(|compile_cmd| {
                 let file_path = compile_cmd.directory.join(&compile_cmd.filename);
                 if let Some(file_path) = file_path.to_str() {
                     !suppressions
                         .files
-                        .iter()
+                        .par_iter()
                         .any(|pattern| pattern.matches(file_path))
                 } else {
                     true
@@ -244,30 +256,36 @@ fn extract_artifacts_from_source_files(
     let clang = Clang::new().map_err(|e| anyhow!(e))?;
     let index = Index::new(&clang, false, false);
 
-    // Populate index by parsing source files
-    let mut potential_leaks: Vec<PotentialLeak> = vec![];
-    for compile_cmd in compile_commands {
-        let file_path = compile_cmd.directory.join(compile_cmd.filename);
-        let translation_unit = index
-            .parser(&file_path)
-            .arguments(&compile_cmd.arguments)
-            .parse()
-            .with_context(|| format!("Failed to parse source file '{}'", file_path.display()))?;
+    compile_commands
+        .into_iter()
+        // Populate indexes by parsing source files in parallel
+        .try_fold(
+            Vec::new(),
+            |mut accum, compile_cmd| -> Result<Vec<PotentialLeak>> {
+                let file_path = compile_cmd.directory.join(&compile_cmd.filename);
+                let translation_unit = index
+                    .parser(&file_path)
+                    .arguments(&compile_cmd.arguments)
+                    .parse()
+                    .with_context(|| {
+                        format!("Failed to parse source file '{}'", file_path.display())
+                    })?;
 
-        let string_literals = gather_entities_by_kind(
-            translation_unit.get_entity(),
-            &[EntityKind::StringLiteral],
-            ignore_system_headers,
-        );
+                let string_literals = gather_entities_by_kind(
+                    translation_unit.get_entity(),
+                    &[EntityKind::StringLiteral],
+                    ignore_system_headers,
+                );
 
-        potential_leaks.extend(
-            string_literals
-                .into_iter()
-                .filter_map(|literal| literal.try_into().ok()),
-        );
-    }
+                accum.extend(
+                    string_literals
+                        .into_iter()
+                        .filter_map(|literal| literal.try_into().ok()),
+                );
 
-    Ok(potential_leaks)
+                Ok(accum)
+            },
+        )
 }
 
 fn filter_suppressed_artifacts(
@@ -276,7 +294,7 @@ fn filter_suppressed_artifacts(
 ) -> Vec<PotentialLeak> {
     if let Some(suppressions) = suppressions {
         potential_leaks
-            .into_iter()
+            .into_par_iter()
             .filter(|leak| !suppressions.artifacts.contains(&leak.leaked_information))
             .collect()
     } else {
@@ -289,7 +307,7 @@ fn find_leaks_in_binary_file<PotentialLeakCollection>(
     leak_desc: PotentialLeakCollection,
 ) -> Result<Vec<ConfirmedLeak>>
 where
-    PotentialLeakCollection: IntoIterator<Item = PotentialLeak>,
+    PotentialLeakCollection: IntoParallelIterator<Item = PotentialLeak>,
 {
     // Read binary file's content
     let mut bin_file = File::open(binary_file_path)?;
@@ -297,47 +315,70 @@ where
     bin_file.read_to_end(&mut bin_data)?;
 
     // Build a map that allows to lookup "leaks' first byte -> leaks"
-    let byte_to_leak = leak_desc.into_iter().fold(
-        HashMap::new(),
-        |mut accum: HashMap<u8, Vec<PotentialLeak>>, potential_leak| {
-            let key = potential_leak.bytes[0];
-            if let Some(value) = accum.get_mut(&key) {
-                value.push(potential_leak);
-            } else {
-                accum.insert(key, vec![potential_leak]);
+    let byte_to_leaks = leak_desc
+        .into_par_iter()
+        .fold(
+            HashMap::new,
+            |mut accum: HashMap<u8, Vec<PotentialLeak>>, potential_leak| {
+                let key = potential_leak.bytes[0];
+                if let Some(value) = accum.get_mut(&key) {
+                    value.push(potential_leak);
+                } else {
+                    accum.insert(key, vec![potential_leak]);
+                }
+                accum
+            },
+        )
+        // Reduce intermediate maps into one
+        .reduce(HashMap::new, |mut accum, other| {
+            for (other_key, mut other_value) in other {
+                if let Some(value) = accum.get_mut(&other_key) {
+                    value.append(&mut other_value);
+                } else {
+                    accum.insert(other_key, other_value);
+                }
             }
-
             accum
-        },
-    );
+        });
 
     // Go through the binary file byte by byte and try to match leaks that start
     // with each byte
-    let mut confirmed_leaks = vec![];
-    for (i, byte_value) in bin_data.iter().enumerate() {
-        if let Some(potential_leaks) = byte_to_leak.get(byte_value) {
-            // Go through each candidate
-            for leak in potential_leaks {
-                // Check bounds
-                if i + leak.bytes.len() <= bin_data.len() {
-                    let byte_slice = &bin_data[i..i + leak.bytes.len()];
-                    if byte_slice == leak.bytes {
-                        // Bytes match, the leak is confirmed
-                        confirmed_leaks.push(ConfirmedLeak {
-                            leaked_information: leak.leaked_information.clone(),
-                            location: information_leak::LeakLocation {
-                                source: leak.declaration_metadata.clone(),
-                                binary: BinaryLocation {
-                                    file: binary_file_path.to_path_buf(),
-                                    offset: i as u64,
+    let confirmed_leaks = bin_data
+        .par_iter()
+        .enumerate()
+        // Find actual leaks
+        .map(|(i, byte_value)| {
+            let mut confirmed_leaks = vec![];
+            if let Some(potential_leaks) = byte_to_leaks.get(byte_value) {
+                // Go through each candidate
+                for leak in potential_leaks {
+                    // Check bounds
+                    if i + leak.bytes.len() <= bin_data.len() {
+                        let byte_slice = &bin_data[i..i + leak.bytes.len()];
+                        if byte_slice == leak.bytes {
+                            // Bytes match, the leak is confirmed
+                            confirmed_leaks.push(ConfirmedLeak {
+                                leaked_information: leak.leaked_information.clone(),
+                                location: information_leak::LeakLocation {
+                                    source: leak.declaration_metadata.clone(),
+                                    binary: BinaryLocation {
+                                        file: binary_file_path.to_path_buf(),
+                                        offset: i as u64,
+                                    },
                                 },
-                            },
-                        });
+                            });
+                        }
                     }
                 }
             }
-        }
-    }
+
+            confirmed_leaks
+        })
+        // Reduce intermediate vectors into one
+        .reduce(Vec::new, |mut accum, mut other| {
+            accum.append(&mut other);
+            accum
+        });
 
     Ok(confirmed_leaks)
 }

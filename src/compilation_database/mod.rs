@@ -1,7 +1,7 @@
 mod compile_commands;
 mod file_list;
 
-use std::{path::PathBuf, rc::Rc};
+use std::{path::PathBuf, sync::Arc};
 
 pub use compile_commands::CompileCommandsDatabase;
 pub use file_list::FileListDatabase;
@@ -10,7 +10,7 @@ pub use file_list::FileListDatabase;
 pub struct CompileCommand {
     pub directory: PathBuf,
     pub filename: PathBuf,
-    pub arguments: Rc<Vec<String>>,
+    pub arguments: Arc<Vec<String>>,
 }
 
 pub type CompileCommands = Vec<CompileCommand>;
