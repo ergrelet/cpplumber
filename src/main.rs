@@ -3,7 +3,7 @@ mod information_leak;
 mod suppressions;
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::File,
     io::Read,
     path::{Path, PathBuf},
@@ -117,10 +117,10 @@ fn main() -> Result<()> {
         // Remove duplicated artifacts if needed
         let potential_leaks: HashSet<PotentialLeak> = HashSet::from_iter(potential_leaks);
         log::debug!("{:#?}", potential_leaks);
-        find_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?
+        find_leaks_in_binary_file(&options.binary_file_path, potential_leaks)?
     } else {
         log::debug!("{:#?}", potential_leaks);
-        find_leaks_in_binary_file(&options.binary_file_path, &potential_leaks)?
+        find_leaks_in_binary_file(&options.binary_file_path, potential_leaks)?
     };
     log::debug!("Done!");
 
@@ -284,36 +284,62 @@ fn filter_suppressed_artifacts(
     }
 }
 
-fn find_leaks_in_binary_file<'l, PotentialLeakCollection>(
+fn find_leaks_in_binary_file<PotentialLeakCollection>(
     binary_file_path: &Path,
     leak_desc: PotentialLeakCollection,
 ) -> Result<Vec<ConfirmedLeak>>
 where
-    PotentialLeakCollection: IntoIterator<Item = &'l PotentialLeak>,
+    PotentialLeakCollection: IntoIterator<Item = PotentialLeak>,
 {
+    // Read binary file's content
     let mut bin_file = File::open(binary_file_path)?;
-
     let mut bin_data = vec![];
     bin_file.read_to_end(&mut bin_data)?;
 
-    Ok(leak_desc
-        .into_iter()
-        .filter_map(|leak| {
-            bin_data
-                .windows(leak.bytes.len())
-                .position(|window| window == leak.bytes)
-                .map(|offset| ConfirmedLeak {
-                    leaked_information: leak.leaked_information.clone(),
-                    location: information_leak::LeakLocation {
-                        source: leak.declaration_metadata.clone(),
-                        binary: BinaryLocation {
-                            file: binary_file_path.to_path_buf(),
-                            offset: offset as u64,
-                        },
-                    },
-                })
-        })
-        .collect())
+    // Build a map that allows to lookup "leaks' first byte -> leaks"
+    let byte_to_leak = leak_desc.into_iter().fold(
+        HashMap::new(),
+        |mut accum: HashMap<u8, Vec<PotentialLeak>>, potential_leak| {
+            let key = potential_leak.bytes[0];
+            if let Some(value) = accum.get_mut(&key) {
+                value.push(potential_leak);
+            } else {
+                accum.insert(key, vec![potential_leak]);
+            }
+
+            accum
+        },
+    );
+
+    // Go through the binary file byte by byte and try to match leaks that start
+    // with each byte
+    let mut confirmed_leaks = vec![];
+    for (i, byte_value) in bin_data.iter().enumerate() {
+        if let Some(potential_leaks) = byte_to_leak.get(byte_value) {
+            // Go through each candidate
+            for leak in potential_leaks {
+                // Check bounds
+                if i + leak.bytes.len() <= bin_data.len() {
+                    let byte_slice = &bin_data[i..i + leak.bytes.len()];
+                    if byte_slice == leak.bytes {
+                        // Bytes match, the leak is confirmed
+                        confirmed_leaks.push(ConfirmedLeak {
+                            leaked_information: leak.leaked_information.clone(),
+                            location: information_leak::LeakLocation {
+                                source: leak.declaration_metadata.clone(),
+                                binary: BinaryLocation {
+                                    file: binary_file_path.to_path_buf(),
+                                    offset: i as u64,
+                                },
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(confirmed_leaks)
 }
 
 #[cfg(test)]
