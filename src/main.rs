@@ -133,10 +133,16 @@ fn main() -> Result<()> {
     };
     log::debug!("Done!");
 
-    // Print the result to stdout
-    print_confirmed_leaks(leaks, options.json_output)?;
+    if leaks.is_empty() {
+        // Nothing leaked, alright!
+        Ok(())
+    } else {
+        // Print the result to stdout
+        print_confirmed_leaks(leaks, options.json_output)?;
 
-    Ok(())
+        // Return an error to indicate that leaks were found (useful for automation)
+        Err(anyhow!("Leaks detected!"))
+    }
 }
 
 fn gather_entities_by_kind<'tu>(
