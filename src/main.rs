@@ -108,7 +108,7 @@ fn main() -> Result<()> {
     log::info!("Extracting artifacts from source files...");
     // Parse source files and extract information that could leak
     let potential_leaks =
-        extract_artifacts_from_source_files(compile_commands, options.report_system_headers)?;
+        extract_artifacts_from_source_files(compile_commands, !options.report_system_headers)?;
 
     log::info!("Filtering suppressed artifacts...");
     // Filter suppressed artifacts by source location if needed
