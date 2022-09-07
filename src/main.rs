@@ -70,7 +70,10 @@ struct CpplumberOptions {
 }
 
 fn main() -> Result<()> {
-    env_logger::init();
+    // Default to 'info' if 'RUST_LOG' is not set
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    // Parse command-line options
     let options = CpplumberOptions::from_args();
 
     // Initial checks before starting work
