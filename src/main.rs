@@ -100,7 +100,8 @@ fn main() -> Result<()> {
     let compilation_db = generate_compilation_database(&options)?;
 
     log::info!("Filtering suppressed files...");
-    // Filter suppressed files
+    // Filter suppressed files from the list, to avoid parsing files we're not
+    // interested in
     let compile_commands =
         filter_suppressed_files(compilation_db.get_all_compile_commands(), &suppressions);
 
@@ -110,8 +111,12 @@ fn main() -> Result<()> {
         extract_artifacts_from_source_files(compile_commands, options.report_system_headers)?;
 
     log::info!("Filtering suppressed artifacts...");
-    // Filter suppressed artifacts if needed
-    let potential_leaks = filter_suppressed_artifacts(potential_leaks, &suppressions);
+    // Filter suppressed artifacts by source location if needed
+    // Note: We need to do this "again" because artifacts from suppressed
+    // headers might have been included during the parsing of other files
+    let potential_leaks = filter_suppressed_artifacts_by_origin(potential_leaks, &suppressions);
+    // Filter suppressed artifacts by value if needed
+    let potential_leaks = filter_suppressed_artifacts_by_value(potential_leaks, &suppressions);
 
     log::info!(
         "Looking for leaks in '{}'...",
@@ -291,7 +296,31 @@ fn extract_artifacts_from_source_files(
         )
 }
 
-fn filter_suppressed_artifacts(
+fn filter_suppressed_artifacts_by_origin(
+    potential_leaks: Vec<PotentialLeak>,
+    suppressions: &Option<Suppressions>,
+) -> Vec<PotentialLeak> {
+    if let Some(suppressions) = suppressions {
+        potential_leaks
+            .into_par_iter()
+            .filter(|leak| {
+                let file_path = &leak.declaration_metadata.file;
+                if let Some(file_path) = file_path.as_os_str().to_str() {
+                    !suppressions
+                        .files
+                        .par_iter()
+                        .any(|pattern| pattern.matches(file_path))
+                } else {
+                    true
+                }
+            })
+            .collect()
+    } else {
+        potential_leaks
+    }
+}
+
+fn filter_suppressed_artifacts_by_value(
     potential_leaks: Vec<PotentialLeak>,
     suppressions: &Option<Suppressions>,
 ) -> Vec<PotentialLeak> {
