@@ -21,6 +21,10 @@ impl CompileCommandsDatabase {
 }
 
 impl CompilationDatabase for CompileCommandsDatabase {
+    fn is_file_path_in_arguments(&self) -> bool {
+        true
+    }
+
     fn get_all_compile_commands(&self) -> CompileCommands {
         let clang_cmds = self.clang_db.get_all_compile_commands();
 
@@ -33,21 +37,10 @@ fn convert_clang_compile_commands(clang_cmds: clang::CompileCommands) -> Compile
     clang_cmds
         .get_commands()
         .iter()
-        .map(|cmd| {
-            // Note: For some reason, having the file path in `arguments` when
-            // passing the file path explicitly to libclang make the parser fail.
-            // So we explicitely pop the last argument (which is the file path).
-            let mut arguments = cmd.get_arguments();
-            // Should contain at least compiler path and file path
-            if arguments.len() > 1 {
-                arguments.pop();
-            }
-
-            CompileCommand {
-                directory: cmd.get_directory(),
-                filename: cmd.get_filename(),
-                arguments: Arc::new(arguments),
-            }
+        .map(|cmd| CompileCommand {
+            directory: cmd.get_directory(),
+            filename: cmd.get_filename(),
+            arguments: Arc::new(cmd.get_arguments()),
         })
         .collect()
 }
@@ -70,6 +63,15 @@ mod tests {
     const INVALID_DATABASE_PATH: &str = "tests/data/compile_commands/invalid.json";
     const EMPTY_DATABASE_PATH: &str = "tests/data/compile_commands/empty.json";
     const DATABASE1_PATH: &str = "tests/data/compile_commands/db1.json";
+
+    #[test]
+    fn is_file_path_in_arguments() {
+        let db_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DATABASE1_PATH);
+        let database = CompileCommandsDatabase::new(db_path).expect("Failed to parse database");
+
+        // Present in arguments
+        assert!(database.is_file_path_in_arguments());
+    }
 
     #[test]
     fn get_all_compile_commands_invalid() {
@@ -113,6 +115,7 @@ mod tests {
                 "-c".to_string(),
                 "-o".to_string(),
                 "file.o".to_string(),
+                "file.cc".to_string(),
             ]
         );
 
@@ -132,6 +135,7 @@ mod tests {
                 "-c".to_string(),
                 "-o".to_string(),
                 "file2.o".to_string(),
+                "file2.cc".to_string(),
             ]
         );
     }

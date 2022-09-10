@@ -16,6 +16,8 @@ pub struct CompileCommand {
 pub type CompileCommands = Vec<CompileCommand>;
 
 pub trait CompilationDatabase {
-    /// Return all the compile commands stored in the database
+    /// Indicates if the file path can be found in the argument list.
+    fn is_file_path_in_arguments(&self) -> bool;
+    /// Returns all the compile commands stored in the database
     fn get_all_compile_commands(&self) -> CompileCommands;
 }

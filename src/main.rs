@@ -116,6 +116,7 @@ fn main() -> Result<()> {
     // Parse source files and extract information that could leak
     let potential_leaks = extract_artifacts_from_source_files(
         compile_commands,
+        compilation_db.is_file_path_in_arguments(),
         !options.report_system_headers,
         minimum_leak_size,
     )?;
@@ -274,6 +275,7 @@ fn filter_suppressed_files(
 
 fn extract_artifacts_from_source_files(
     compile_commands: CompileCommands,
+    use_file_path_from_arguments: bool,
     ignore_system_headers: bool,
     minimum_leak_size: usize,
 ) -> Result<Vec<PotentialLeak>> {
@@ -287,7 +289,14 @@ fn extract_artifacts_from_source_files(
         .try_fold(
             Vec::new(),
             |mut accum, compile_cmd| -> Result<Vec<PotentialLeak>> {
-                let file_path = compile_cmd.directory.join(&compile_cmd.filename);
+                // Note: For some reason, having the file path in `arguments` when
+                // passing the file path explicitly to libclang make the parser fail.
+                // So we explicitely avoid doing so.
+                let file_path = if use_file_path_from_arguments {
+                    PathBuf::default()
+                } else {
+                    compile_cmd.directory.join(&compile_cmd.filename)
+                };
                 let translation_unit = index
                     .parser(&file_path)
                     .arguments(&compile_cmd.arguments)
@@ -467,9 +476,13 @@ mod tests {
             ],
             vec!["-DDEF_TEST".to_string()],
         );
-        let potential_leaks =
-            extract_artifacts_from_source_files(file_list_db.get_all_compile_commands(), true, 0)
-                .expect("extract_artifacts_from_source_files failed");
+        let potential_leaks = extract_artifacts_from_source_files(
+            file_list_db.get_all_compile_commands(),
+            file_list_db.is_file_path_in_arguments(),
+            true,
+            0,
+        )
+        .expect("extract_artifacts_from_source_files failed");
 
         let expected_string_literals = vec![
             // header.h
@@ -516,9 +529,13 @@ mod tests {
             ],
             vec!["-DDEF_TEST".to_string()],
         );
-        let potential_leaks =
-            extract_artifacts_from_source_files(file_list_db.get_all_compile_commands(), true, 24)
-                .expect("extract_artifacts_from_source_files failed");
+        let potential_leaks = extract_artifacts_from_source_files(
+            file_list_db.get_all_compile_commands(),
+            file_list_db.is_file_path_in_arguments(),
+            true,
+            24,
+        )
+        .expect("extract_artifacts_from_source_files failed");
 
         let expected_string_literals = vec![
             // main.cc

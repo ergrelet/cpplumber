@@ -20,6 +20,10 @@ impl FileListDatabase {
 }
 
 impl CompilationDatabase for FileListDatabase {
+    fn is_file_path_in_arguments(&self) -> bool {
+        false
+    }
+
     fn get_all_compile_commands(&self) -> CompileCommands {
         self.file_paths
             .iter()
@@ -37,6 +41,14 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
+
+    #[test]
+    fn is_file_path_in_arguments() {
+        let database = FileListDatabase::new(&[], vec![]);
+
+        // Not present in arguments
+        assert!(!database.is_file_path_in_arguments());
+    }
 
     #[test]
     fn get_all_compile_commands_empty() {
