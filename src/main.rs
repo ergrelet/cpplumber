@@ -358,12 +358,14 @@ where
         .fold(
             HashMap::new,
             |mut accum: HashMap<u8, Vec<PotentialLeak>>, potential_leak| {
-                let key = potential_leak.bytes[0];
-                if let Some(value) = accum.get_mut(&key) {
-                    value.push(potential_leak);
-                } else {
-                    accum.insert(key, vec![potential_leak]);
+                if let Some(key) = potential_leak.bytes.first() {
+                    if let Some(value) = accum.get_mut(key) {
+                        value.push(potential_leak);
+                    } else {
+                        accum.insert(*key, vec![potential_leak]);
+                    }
                 }
+
                 accum
             },
         )
