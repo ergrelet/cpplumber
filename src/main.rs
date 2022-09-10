@@ -61,6 +61,12 @@ struct CpplumberOptions {
     #[structopt(long)]
     report_system_headers: bool,
 
+    /// Minimum required size in bytes, for a leak to be reported. Defaults to 4.
+    /// Warning: Setting this to a lower value might greatly increase resource
+    /// consumption and reports' sizes.
+    #[structopt(short, long)]
+    minimum_leak_size: Option<usize>,
+
     /// Generate output as JSON.
     #[structopt(short, long = "json")]
     json_output: bool,
@@ -75,6 +81,7 @@ fn main() -> Result<()> {
 
     // Parse command-line options
     let options = CpplumberOptions::from_args();
+    let minimum_leak_size = options.minimum_leak_size.unwrap_or(4);
 
     // Initial checks before starting work
     if !options.binary_file_path.is_file() {
@@ -107,8 +114,11 @@ fn main() -> Result<()> {
 
     log::info!("Extracting artifacts from source files...");
     // Parse source files and extract information that could leak
-    let potential_leaks =
-        extract_artifacts_from_source_files(compile_commands, !options.report_system_headers)?;
+    let potential_leaks = extract_artifacts_from_source_files(
+        compile_commands,
+        !options.report_system_headers,
+        minimum_leak_size,
+    )?;
 
     log::info!("Filtering suppressed artifacts...");
     // Filter suppressed artifacts by source location if needed
@@ -265,6 +275,7 @@ fn filter_suppressed_files(
 fn extract_artifacts_from_source_files(
     compile_commands: CompileCommands,
     ignore_system_headers: bool,
+    minimum_leak_size: usize,
 ) -> Result<Vec<PotentialLeak>> {
     // Prepare the clang index
     let clang = Clang::new().map_err(|e| anyhow!(e))?;
@@ -291,11 +302,25 @@ fn extract_artifacts_from_source_files(
                     ignore_system_headers,
                 );
 
-                accum.extend(
-                    string_literals
-                        .into_iter()
-                        .filter_map(|literal| literal.try_into().ok()),
-                );
+                accum.extend(string_literals.into_iter().filter_map(|literal| {
+                    let leak_res: Result<PotentialLeak> = literal.try_into();
+                    if let Ok(potential_leak) = leak_res {
+                        if potential_leak.bytes.len() >= minimum_leak_size {
+                            Some(potential_leak)
+                        } else {
+                            // Value is too small, ignore it
+                            None
+                        }
+                    } else {
+                        // Log failure and discard element
+                        log::warn!(
+                            "Failed to process entity '{:?}': {}",
+                            literal,
+                            leak_res.unwrap_err()
+                        );
+                        None
+                    }
+                }));
 
                 Ok(accum)
             },
@@ -427,9 +452,12 @@ where
 mod tests {
     use super::*;
 
+    use serial_test::serial;
+
     const FILE_LIST_PROJ_PATH: &str = "tests/data/main/file_list_proj";
 
     #[test]
+    #[serial]
     fn extract_artifacts_from_source_files_file_list() {
         let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
         let file_list_db = FileListDatabase::new(
@@ -440,7 +468,7 @@ mod tests {
             vec!["-DDEF_TEST".to_string()],
         );
         let potential_leaks =
-            extract_artifacts_from_source_files(file_list_db.get_all_compile_commands(), true)
+            extract_artifacts_from_source_files(file_list_db.get_all_compile_commands(), true, 0)
                 .expect("extract_artifacts_from_source_files failed");
 
         let expected_string_literals = vec![
@@ -468,11 +496,47 @@ mod tests {
             "L\"preprocessor_string_literal\"",
             r#""%s\n""#,
         ];
-        assert_eq!(expected_string_literals.len(), potential_leaks.len());
+
         // Check extracted string literals
         assert!(potential_leaks.iter().enumerate().all(|(i, leak)| {
             println!("{:?}", leak.leaked_information);
             leak.leaked_information == expected_string_literals[i]
         }));
+        assert_eq!(expected_string_literals.len(), potential_leaks.len());
+    }
+
+    #[test]
+    #[serial]
+    fn extract_artifacts_with_minimum_leak_size() {
+        let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
+        let file_list_db = FileListDatabase::new(
+            &[
+                root_dir_path.join("main.cc"),
+                root_dir_path.join("header.h"),
+            ],
+            vec!["-DDEF_TEST".to_string()],
+        );
+        let potential_leaks =
+            extract_artifacts_from_source_files(file_list_db.get_all_compile_commands(), true, 24)
+                .expect("extract_artifacts_from_source_files failed");
+
+        let expected_string_literals = vec![
+            // main.cc
+            "u\"utf16_string\"",
+            "U\"utf32_string\"",
+            "L\"wide_raw_string\"",
+            "u\"raw_utf16_string\"",
+            "U\"raw_utf32_string\"",
+            r#""'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202""#,
+            "\"preprocessor_string_literal\"",
+            "L\"preprocessor_string_literal\"",
+        ];
+
+        // Check extracted string literals
+        assert!(potential_leaks.iter().enumerate().all(|(i, leak)| {
+            println!("{:?}", leak.leaked_information);
+            leak.leaked_information == expected_string_literals[i]
+        }));
+        assert_eq!(expected_string_literals.len(), potential_leaks.len());
     }
 }
