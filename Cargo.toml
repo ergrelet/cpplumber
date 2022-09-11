@@ -11,7 +11,7 @@ widestring = "1.0"
 log = "0.4"
 env_logger = "0.9"
 glob = "0.3.0"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 tempfile = "3.3"

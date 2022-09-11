@@ -7,6 +7,7 @@ use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
+    sync::Arc,
     vec,
 };
 
@@ -417,6 +418,7 @@ where
 
     // Go through the binary file byte by byte and try to match leaks that start
     // with each byte
+    let shared_binary_file_path = Arc::new(binary_file_path.to_path_buf());
     let confirmed_leaks = bin_data
         .par_iter()
         .enumerate()
@@ -436,7 +438,7 @@ where
                                 location: information_leak::LeakLocation {
                                     source: leak.declaration_metadata.clone(),
                                     binary: BinaryLocation {
-                                        file: binary_file_path.to_path_buf(),
+                                        file: shared_binary_file_path.clone(),
                                         offset: i as u64,
                                     },
                                 },
@@ -513,7 +515,7 @@ mod tests {
         // Check extracted string literals
         assert!(potential_leaks.iter().enumerate().all(|(i, leak)| {
             println!("{:?}", leak.leaked_information);
-            leak.leaked_information == expected_string_literals[i]
+            *leak.leaked_information == expected_string_literals[i]
         }));
         assert_eq!(expected_string_literals.len(), potential_leaks.len());
     }
@@ -552,7 +554,7 @@ mod tests {
         // Check extracted string literals
         assert!(potential_leaks.iter().enumerate().all(|(i, leak)| {
             println!("{:?}", leak.leaked_information);
-            leak.leaked_information == expected_string_literals[i]
+            *leak.leaked_information == expected_string_literals[i]
         }));
         assert_eq!(expected_string_literals.len(), potential_leaks.len());
     }

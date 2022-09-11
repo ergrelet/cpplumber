@@ -1,4 +1,4 @@
-use std::{borrow::Cow, hash::Hash, path::PathBuf};
+use std::{borrow::Cow, hash::Hash, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use clang::{Entity, EntityKind};
@@ -11,13 +11,13 @@ const REPORT_FORMAT_VERSION: u32 = 1;
 #[derive(Debug, Clone)]
 pub struct PotentialLeak {
     /// Leaked information, as represented in the source code
-    pub leaked_information: String,
+    pub leaked_information: Arc<String>,
     /// Byte pattern to match (i.e., leaked information, as represented in the
     /// binary file)
     pub bytes: Vec<u8>,
     /// Data on where the leaked information is declared in the
     /// source code
-    pub declaration_metadata: SourceLocation,
+    pub declaration_metadata: Arc<SourceLocation>,
 }
 
 impl TryFrom<Entity<'_>> for PotentialLeak {
@@ -26,18 +26,26 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
     fn try_from(entity: Entity) -> Result<Self, Self::Error> {
         match entity.get_kind() {
             EntityKind::StringLiteral => {
-                let leaked_information = entity.get_display_name().unwrap();
-                let location = entity.get_location().unwrap().get_file_location();
-                let file_location = location.file.unwrap().get_path();
+                let leaked_information = entity
+                    .get_display_name()
+                    .ok_or_else(|| anyhow!("Failed to get entity's display name"))?;
+                let location = entity
+                    .get_location()
+                    .ok_or_else(|| anyhow!("Failed to get entity's location"))?
+                    .get_file_location();
+                let file_location = location
+                    .file
+                    .ok_or_else(|| anyhow!("Failed to get entity's file location"))?
+                    .get_path();
                 let line_location = location.line;
 
                 Ok(Self {
                     bytes: string_literal_to_bytes(&leaked_information)?,
-                    leaked_information,
-                    declaration_metadata: SourceLocation {
+                    leaked_information: Arc::new(leaked_information),
+                    declaration_metadata: Arc::new(SourceLocation {
                         file: file_location,
                         line: line_location as u64,
-                    },
+                    }),
                 })
             }
             _ => Err(anyhow!("Unsupported entity kind")),
@@ -61,13 +69,13 @@ impl Hash for PotentialLeak {
 
 #[derive(Serialize)]
 pub struct ConfirmedLeak {
-    pub leaked_information: String,
+    pub leaked_information: Arc<String>,
     pub location: LeakLocation,
 }
 
 #[derive(Serialize)]
 pub struct LeakLocation {
-    pub source: SourceLocation,
+    pub source: Arc<SourceLocation>,
     pub binary: BinaryLocation,
 }
 
@@ -79,7 +87,7 @@ pub struct SourceLocation {
 
 #[derive(Serialize)]
 pub struct BinaryLocation {
-    pub file: PathBuf,
+    pub file: Arc<PathBuf>,
     pub offset: u64,
 }
 
