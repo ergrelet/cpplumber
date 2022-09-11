@@ -566,4 +566,90 @@ mod tests {
         }));
         assert_eq!(expected_string_literals.len(), potential_leaks.len());
     }
+
+    #[cfg(windows)]
+    #[test]
+    #[serial]
+    fn find_leaks_in_binary_file_exe() {
+        // Gather potential leaks
+        let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
+        let file_list_db = FileListDatabase::new(
+            &[root_dir_path.join("main.cc")],
+            vec!["-DDEF_TEST".to_string()],
+        );
+        let potential_leaks = extract_artifacts_from_source_files(
+            file_list_db.get_all_compile_commands(),
+            file_list_db.is_file_path_in_arguments(),
+            true,
+            0,
+        )
+        .expect("extract_artifacts_from_source_files failed");
+
+        // Look for leaks present in the compiled binary
+        let bin_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(FILE_LIST_PROJ_PATH)
+            .join("a.exe");
+
+        let confirmed_leaks = find_leaks_in_binary_file(&bin_path, potential_leaks)
+            .expect("find_leaks_in_binary_file failed");
+
+        let expected_string_literals = vec![
+            // main.cc
+            "\"included_string_literal\"",
+            "\"preprocessor_string_literal\"",
+            "\"%s\\n\"",
+            "\"%s\\n\"",
+            "L\"preprocessor_string_literal\"",
+            r#"L"%s\n""#,
+        ];
+
+        // Check extracted string literals
+        assert!(confirmed_leaks.iter().enumerate().all(|(i, leak)| {
+            println!("{:?}", leak.leaked_information);
+            *leak.leaked_information == expected_string_literals[i]
+        }));
+        assert_eq!(confirmed_leaks.len(), expected_string_literals.len());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn find_leaks_in_binary_file_elf() {
+        // Gather potential leaks
+        let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
+        let file_list_db = FileListDatabase::new(
+            &[root_dir_path.join("main.cc")],
+            vec!["-DDEF_TEST".to_string()],
+        );
+        let potential_leaks = extract_artifacts_from_source_files(
+            file_list_db.get_all_compile_commands(),
+            file_list_db.is_file_path_in_arguments(),
+            true,
+            0,
+        )
+        .expect("extract_artifacts_from_source_files failed");
+
+        // Look for leaks present in the compiled binary
+        let bin_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(FILE_LIST_PROJ_PATH)
+            .join("a.out");
+
+        let confirmed_leaks = find_leaks_in_binary_file(&bin_path, potential_leaks)
+            .expect("find_leaks_in_binary_file failed");
+
+        let expected_string_literals = vec![
+            // main.cc
+            "\"included_string_literal\"",
+            "\"preprocessor_string_literal\"",
+            r#"L"%s\n""#,
+            "L\"preprocessor_string_literal\"",
+        ];
+
+        // Check extracted string literals
+        assert!(confirmed_leaks.iter().enumerate().all(|(i, leak)| {
+            println!("{:?}", leak.leaked_information);
+            *leak.leaked_information == expected_string_literals[i]
+        }));
+        assert_eq!(confirmed_leaks.len(), expected_string_literals.len());
+    }
 }
