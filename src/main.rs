@@ -525,29 +525,37 @@ mod tests {
     fn extract_artifacts_with_minimum_leak_size() {
         let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
         let file_list_db = FileListDatabase::new(
-            &[
-                root_dir_path.join("main.cc"),
-                root_dir_path.join("header.h"),
-            ],
+            &[root_dir_path.join("main.cc")],
             vec!["-DDEF_TEST".to_string()],
         );
         let potential_leaks = extract_artifacts_from_source_files(
             file_list_db.get_all_compile_commands(),
             file_list_db.is_file_path_in_arguments(),
             true,
-            24,
+            4,
         )
         .expect("extract_artifacts_from_source_files failed");
 
+        // r#""%s\n""# should be removed
         let expected_string_literals = vec![
             // main.cc
+            "\"included_string_literal\"",
+            "\"c_string\"",
+            "u8\"utf8_string\"",
+            "L\"wide_string\"",
             "u\"utf16_string\"",
             "U\"utf32_string\"",
+            "\"raw_string\"",
+            "u8\"raw_utf8_string\"",
             "L\"wide_raw_string\"",
             "u\"raw_utf16_string\"",
             "U\"raw_utf32_string\"",
+            "\"def_test\"",
+            "\"concatenated_string\"",
+            r#""multiline\nstring""#,
             r#""'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202""#,
             "\"preprocessor_string_literal\"",
+            r#"L"%s\n""#,
             "L\"preprocessor_string_literal\"",
         ];
 

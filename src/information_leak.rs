@@ -8,6 +8,14 @@ use widestring::{encode_utf16, encode_utf32};
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const REPORT_FORMAT_VERSION: u32 = 1;
 
+/// Enum that the kind of wide chars to use
+pub enum WideCharMode {
+    /// Wide strings are encoded as UTF-16LE
+    Windows,
+    /// Wide strings are encoded as UTF-32LE
+    Unix,
+}
+
 #[derive(Debug, Clone)]
 pub struct PotentialLeak {
     /// Leaked information, as represented in the source code
@@ -40,7 +48,7 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
                 let line_location = location.line;
 
                 Ok(Self {
-                    bytes: string_literal_to_bytes(&leaked_information)?,
+                    bytes: string_literal_to_bytes(&leaked_information, None)?,
                     leaked_information: Arc::new(leaked_information),
                     declaration_metadata: Arc::new(SourceLocation {
                         file: file_location,
@@ -105,7 +113,19 @@ struct ReportVersion {
 
 /// We have to reimplement this ourselves since the `clang` crate doesn't
 /// provide an easy way to get byte representations of `StringLiteral` entities.
-fn string_literal_to_bytes(string_literal: &str) -> Result<Vec<u8>> {
+fn string_literal_to_bytes(
+    string_literal: &str,
+    wide_char_mode: Option<WideCharMode>,
+) -> Result<Vec<u8>> {
+    let wide_char_mode = wide_char_mode.unwrap_or({
+        // Pick the sensible default if not specified
+        if cfg!(windows) {
+            WideCharMode::Windows
+        } else {
+            WideCharMode::Unix
+        }
+    });
+
     let mut char_it = string_literal.chars();
     let first_char = char_it.next();
     match first_char {
@@ -118,17 +138,37 @@ fn string_literal_to_bytes(string_literal: &str) -> Result<Vec<u8>> {
                     .as_bytes()
                     .to_owned(),
             ),
-            // Wide string (we assume it'll be encoded to UTF-16LE)
-            'L' => Ok(encode_utf16(
-                process_escape_sequences(&string_literal[2..string_literal.len() - 1])
-                    .ok_or_else(|| anyhow!("Failed to process escape sequences"))?
-                    .chars(),
-            )
-            .map(u16::to_le_bytes)
-            .fold(Vec::new(), |mut acc: Vec<u8>, e| {
-                acc.extend(e);
-                acc
-            })),
+            // Wide string
+            'L' => {
+                match wide_char_mode {
+                    WideCharMode::Windows => {
+                        // Encode as UTF-16LE on Windows
+                        Ok(encode_utf16(
+                            process_escape_sequences(&string_literal[2..string_literal.len() - 1])
+                                .ok_or_else(|| anyhow!("Failed to process escape sequences"))?
+                                .chars(),
+                        )
+                        .map(u16::to_le_bytes)
+                        .fold(Vec::new(), |mut acc: Vec<u8>, e| {
+                            acc.extend(e);
+                            acc
+                        }))
+                    }
+                    WideCharMode::Unix => {
+                        // Encode as UTF-32LE on Unix platforms
+                        Ok(encode_utf32(
+                            process_escape_sequences(&string_literal[2..string_literal.len() - 1])
+                                .ok_or_else(|| anyhow!("Failed to process escape sequences"))?
+                                .chars(),
+                        )
+                        .map(u32::to_le_bytes)
+                        .fold(Vec::new(), |mut acc: Vec<u8>, e| {
+                            acc.extend(e);
+                            acc
+                        }))
+                    }
+                }
+            }
             // UTF-32 string
             'U' => Ok(encode_utf32(
                 process_escape_sequences(&string_literal[2..string_literal.len() - 1])
@@ -222,7 +262,6 @@ fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
                         // Octal escape sequence (\nnn)
                         let octal_value =
                             u8::from_str_radix(&string[start_position..end_position], 8).ok()?;
-                        // TODO: Fix wrong multibyte transformations in some cases
                         b.push(octal_value as char);
                         skip_until = end_position;
                     }
@@ -275,36 +314,62 @@ mod tests {
 
     #[test]
     fn string_literal_to_bytes_empty_string() {
-        assert!(string_literal_to_bytes("")
+        assert!(string_literal_to_bytes("", None)
             .expect("string_literal_to_bytes failed")
             .is_empty());
     }
 
     #[test]
     fn string_literal_to_bytes_not_a_literal() {
-        assert!(string_literal_to_bytes("not a literal").is_err());
+        assert!(string_literal_to_bytes("not a literal", None).is_err());
     }
 
     #[test]
     fn string_literal_to_bytes_ascii_string_literal() {
         assert_eq!(
-            string_literal_to_bytes("\"hello\"").expect("string_literal_to_bytes failed"),
+            string_literal_to_bytes("\"hello\"", None).expect("string_literal_to_bytes failed"),
             b"hello"
         );
     }
 
     #[test]
-    fn string_literal_to_bytes_wide_string_literal() {
+    fn string_literal_to_bytes_wide_string_literal_default() {
+        // On Windows, wide chars are encoded as UTF-16LE
+        #[cfg(windows)]
         assert_eq!(
-            string_literal_to_bytes("L\"hello\"").expect("string_literal_to_bytes failed"),
+            string_literal_to_bytes("L\"hello\"", None).expect("string_literal_to_bytes failed"),
             b"h\0e\0l\0l\0o\0"
+        );
+
+        // On Unix-like platforms, wide chars are encoded as UTF-32LE
+        #[cfg(unix)]
+        assert_eq!(
+            string_literal_to_bytes("L\"hello\"", None).expect("string_literal_to_bytes failed"),
+            b"h\0\0\0e\0\0\0l\0\0\0l\0\0\0o\0\0\0"
+        );
+    }
+
+    #[test]
+    fn string_literal_to_bytes_wide_string_literal_override() {
+        // On Windows, wide chars are encoded as UTF-16LE
+        assert_eq!(
+            string_literal_to_bytes("L\"hello\"", Some(WideCharMode::Windows))
+                .expect("string_literal_to_bytes failed"),
+            b"h\0e\0l\0l\0o\0"
+        );
+
+        // On Unix-like platforms, wide chars are encoded as UTF-32LE
+        assert_eq!(
+            string_literal_to_bytes("L\"hello\"", Some(WideCharMode::Unix))
+                .expect("string_literal_to_bytes failed"),
+            b"h\0\0\0e\0\0\0l\0\0\0l\0\0\0o\0\0\0"
         );
     }
 
     #[test]
     fn string_literal_to_bytes_utf8_string_literal() {
         assert_eq!(
-            string_literal_to_bytes("u8\"hello\"").expect("string_literal_to_bytes failed"),
+            string_literal_to_bytes("u8\"hello\"", None).expect("string_literal_to_bytes failed"),
             b"hello"
         );
     }
@@ -312,7 +377,7 @@ mod tests {
     #[test]
     fn string_literal_to_bytes_utf16_string_literal() {
         assert_eq!(
-            string_literal_to_bytes("u\"hello\"").expect("string_literal_to_bytes failed"),
+            string_literal_to_bytes("u\"hello\"", None).expect("string_literal_to_bytes failed"),
             b"h\0e\0l\0l\0o\0"
         );
     }
@@ -320,7 +385,7 @@ mod tests {
     #[test]
     fn string_literal_to_bytes_utf32_string_literal() {
         assert_eq!(
-            string_literal_to_bytes("U\"hello\"").expect("string_literal_to_bytes failed"),
+            string_literal_to_bytes("U\"hello\"", None).expect("string_literal_to_bytes failed"),
             b"h\0\0\0e\0\0\0l\0\0\0l\0\0\0o\0\0\0"
         );
     }
