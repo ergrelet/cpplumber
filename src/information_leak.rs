@@ -295,12 +295,12 @@ pub fn print_confirmed_leaks(confirmed_leaks: Vec<ConfirmedLeak>, json: bool) ->
     } else {
         for leak in confirmed_leaks {
             println!(
-                "[{}:{}]: {} leaked at {}+0x{:x}",
+                "{} leaked at offset 0x{:x} in \"{}\" [declared at {}:{}]",
+                leak.leaked_information,
+                leak.location.binary.offset,
+                leak.location.binary.file.display(),
                 leak.location.source.file.display(),
                 leak.location.source.line,
-                leak.leaked_information,
-                leak.location.binary.file.display(),
-                leak.location.binary.offset,
             );
         }
     }
