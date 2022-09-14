@@ -51,7 +51,7 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
                     bytes: string_literal_to_bytes(&leaked_information, None)?,
                     leaked_information: Arc::new(leaked_information),
                     declaration_metadata: Arc::new(SourceLocation {
-                        file: file_location,
+                        file: file_location.canonicalize()?,
                         line: line_location as u64,
                     }),
                 })

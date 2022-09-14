@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 use std::{collections::BTreeSet, sync::Arc};
 
+use anyhow::Result;
+use rayon::prelude::*;
+
 use super::{CompilationDatabase, CompileCommand, CompileCommands};
 
 pub struct FileListDatabase {
@@ -24,13 +27,14 @@ impl CompilationDatabase for FileListDatabase {
         false
     }
 
-    fn get_all_compile_commands(&self) -> CompileCommands {
+    fn get_all_compile_commands(&self) -> Result<CompileCommands> {
         self.file_paths
-            .iter()
-            .map(|file_path| CompileCommand {
-                directory: file_path.parent().unwrap().to_owned(),
-                filename: file_path.file_name().unwrap().into(),
-                arguments: self.arguments.clone(),
+            .par_iter()
+            .map(|file_path| {
+                Ok(CompileCommand {
+                    filename: file_path.canonicalize()?,
+                    arguments: self.arguments.clone(),
+                })
             })
             .collect()
     }
@@ -38,9 +42,9 @@ impl CompilationDatabase for FileListDatabase {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
+
+    const FILE_LIST_PROJ_PATH: &str = "tests/data/main/file_list_proj";
 
     #[test]
     fn is_file_path_in_arguments() {
@@ -54,37 +58,45 @@ mod tests {
     fn get_all_compile_commands_empty() {
         let database = FileListDatabase::new(&[], vec![]);
         // Result is empty
-        assert!(database.get_all_compile_commands().is_empty());
+        assert!(database
+            .get_all_compile_commands()
+            .expect("get_all_compile_commands failed")
+            .is_empty());
     }
 
     #[test]
     fn get_all_compile_commands() {
+        let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
         let arguments = vec!["arg1".to_string(), "arg2".to_string()];
         let database = FileListDatabase::new(
             &[
-                PathBuf::from_str("file1.cc").unwrap(),
-                PathBuf::from_str("file2.c").unwrap(),
+                root_dir_path.join("main.cc"),
+                root_dir_path.join("header.h"),
             ],
             arguments.clone(),
         );
 
-        let compile_commands = database.get_all_compile_commands();
+        let compile_commands = database
+            .get_all_compile_commands()
+            .expect("get_all_compile_commands failed");
         // Result is not empty
         assert_eq!(compile_commands.len(), 2);
 
         // File #1
-        // Check `directory` value
-        assert_eq!(compile_commands[0].directory.to_str().unwrap(), "");
         // Check `filename` value
-        assert_eq!(compile_commands[0].filename.to_str().unwrap(), "file1.cc");
+        assert_eq!(
+            compile_commands[0].filename,
+            root_dir_path.join("header.h").canonicalize().unwrap()
+        );
         // Check `arguments` value
         assert_eq!(*compile_commands[0].arguments, arguments);
 
         // File #2
-        // Check `directory` value
-        assert_eq!(compile_commands[1].directory.to_str().unwrap(), "");
         // Check `filename` value
-        assert_eq!(compile_commands[1].filename.to_str().unwrap(), "file2.c");
+        assert_eq!(
+            compile_commands[1].filename,
+            root_dir_path.join("main.cc").canonicalize().unwrap()
+        );
         // Check `arguments` value
         assert_eq!(*compile_commands[1].arguments, arguments);
     }

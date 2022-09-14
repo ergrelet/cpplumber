@@ -111,7 +111,7 @@ fn main() -> Result<()> {
     // Filter suppressed files from the list, to avoid parsing files we're not
     // interested in
     let compile_commands =
-        filter_suppressed_files(compilation_db.get_all_compile_commands(), &suppressions);
+        filter_suppressed_files(compilation_db.get_all_compile_commands()?, &suppressions);
 
     log::info!("Extracting artifacts from source files...");
     // Parse source files and extract information that could leak
@@ -258,8 +258,7 @@ fn filter_suppressed_files(
         compile_cmds
             .into_par_iter()
             .filter(|compile_cmd| {
-                let file_path = compile_cmd.directory.join(&compile_cmd.filename);
-                if let Some(file_path) = file_path.to_str() {
+                if let Some(file_path) = compile_cmd.filename.to_str() {
                     !suppressions
                         .files
                         .par_iter()
@@ -296,7 +295,7 @@ fn extract_artifacts_from_source_files(
                 let file_path = if use_file_path_from_arguments {
                     PathBuf::default()
                 } else {
-                    compile_cmd.directory.join(&compile_cmd.filename)
+                    compile_cmd.filename
                 };
                 let translation_unit = index
                     .parser(&file_path)
@@ -418,7 +417,7 @@ where
 
     // Go through the binary file byte by byte and try to match leaks that start
     // with each byte
-    let shared_binary_file_path = Arc::new(binary_file_path.to_path_buf());
+    let shared_binary_file_path = Arc::new(binary_file_path.to_path_buf().canonicalize()?);
     let confirmed_leaks = bin_data
         .par_iter()
         .enumerate()
@@ -476,10 +475,15 @@ mod tests {
                 root_dir_path.join("main.cc"),
                 root_dir_path.join("header.h"),
             ],
-            vec!["-DDEF_TEST".to_string()],
+            vec![
+                "-DDEF_TEST".to_string(),
+                format!("-I{}", FILE_LIST_PROJ_PATH),
+            ],
         );
         let potential_leaks = extract_artifacts_from_source_files(
-            file_list_db.get_all_compile_commands(),
+            file_list_db
+                .get_all_compile_commands()
+                .expect("get_all_compile_commands failed"),
             file_list_db.is_file_path_in_arguments(),
             true,
             0,
@@ -526,10 +530,15 @@ mod tests {
         let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
         let file_list_db = FileListDatabase::new(
             &[root_dir_path.join("main.cc")],
-            vec!["-DDEF_TEST".to_string()],
+            vec![
+                "-DDEF_TEST".to_string(),
+                format!("-I{}", FILE_LIST_PROJ_PATH),
+            ],
         );
         let potential_leaks = extract_artifacts_from_source_files(
-            file_list_db.get_all_compile_commands(),
+            file_list_db
+                .get_all_compile_commands()
+                .expect("get_all_compile_commands failed"),
             file_list_db.is_file_path_in_arguments(),
             true,
             4,
@@ -575,10 +584,15 @@ mod tests {
         let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
         let file_list_db = FileListDatabase::new(
             &[root_dir_path.join("main.cc")],
-            vec!["-DDEF_TEST".to_string()],
+            vec![
+                "-DDEF_TEST".to_string(),
+                format!("-I{}", FILE_LIST_PROJ_PATH),
+            ],
         );
         let potential_leaks = extract_artifacts_from_source_files(
-            file_list_db.get_all_compile_commands(),
+            file_list_db
+                .get_all_compile_commands()
+                .expect("get_all_compile_commands failed"),
             file_list_db.is_file_path_in_arguments(),
             true,
             0,
@@ -622,7 +636,9 @@ mod tests {
             vec!["-DDEF_TEST".to_string()],
         );
         let potential_leaks = extract_artifacts_from_source_files(
-            file_list_db.get_all_compile_commands(),
+            file_list_db
+                .get_all_compile_commands()
+                .expect("get_all_compile_commands failed"),
             file_list_db.is_file_path_in_arguments(),
             true,
             0,

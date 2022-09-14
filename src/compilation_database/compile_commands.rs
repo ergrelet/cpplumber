@@ -25,7 +25,7 @@ impl CompilationDatabase for CompileCommandsDatabase {
         true
     }
 
-    fn get_all_compile_commands(&self) -> CompileCommands {
+    fn get_all_compile_commands(&self) -> Result<CompileCommands> {
         let clang_cmds = self.clang_db.get_all_compile_commands();
 
         convert_clang_compile_commands(clang_cmds)
@@ -33,14 +33,16 @@ impl CompilationDatabase for CompileCommandsDatabase {
 }
 
 /// Converts `clang`'s CompileCommands to our own `CompileCommands` type
-fn convert_clang_compile_commands(clang_cmds: clang::CompileCommands) -> CompileCommands {
+fn convert_clang_compile_commands(clang_cmds: clang::CompileCommands) -> Result<CompileCommands> {
     clang_cmds
         .get_commands()
         .iter()
-        .map(|cmd| CompileCommand {
-            directory: cmd.get_directory(),
-            filename: cmd.get_filename(),
-            arguments: Arc::new(cmd.get_arguments()),
+        .map(|cmd| {
+            Ok(CompileCommand {
+                // Some file paths may not be canonical, so we have to force them to be
+                filename: cmd.get_filename().canonicalize()?,
+                arguments: Arc::new(cmd.get_arguments()),
+            })
         })
         .collect()
 }
@@ -60,6 +62,7 @@ mod tests {
 
     use super::*;
 
+    const COMPILE_COMMANDS_PATH: &str = "tests/data/compile_commands";
     const INVALID_DATABASE_PATH: &str = "tests/data/compile_commands/invalid.json";
     const EMPTY_DATABASE_PATH: &str = "tests/data/compile_commands/empty.json";
     const DATABASE1_PATH: &str = "tests/data/compile_commands/db1.json";
@@ -90,20 +93,22 @@ mod tests {
 
     #[test]
     fn get_all_compile_commands() {
+        let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(COMPILE_COMMANDS_PATH);
         let db_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DATABASE1_PATH);
         let database = CompileCommandsDatabase::new(db_path).expect("Failed to parse database");
 
-        let compile_commands = database.get_all_compile_commands();
+        let compile_commands = database
+            .get_all_compile_commands()
+            .expect("get_all_compile_commands failed");
         // Result is not empty
         assert_eq!(compile_commands.len(), 2);
 
-        const DIRECTORY: &str = "C:\\Users\\user\\Documents\\cpplumber";
-
         // File #1
-        // Check `directory` value
-        assert_eq!(compile_commands[0].directory.to_str().unwrap(), DIRECTORY);
         // Check `filename` value
-        assert_eq!(compile_commands[0].filename.to_str().unwrap(), "file.cc");
+        assert_eq!(
+            compile_commands[0].filename,
+            root_dir_path.join("file1.cc").canonicalize().unwrap()
+        );
         // Check `arguments` value
         assert_eq!(
             *compile_commands[0].arguments,
@@ -114,16 +119,17 @@ mod tests {
                 "-DSOMEDEF=With spaces, quotes.".to_string(),
                 "-c".to_string(),
                 "-o".to_string(),
-                "file.o".to_string(),
-                "file.cc".to_string(),
+                "file1.o".to_string(),
+                "tests/data/compile_commands/file1.cc".to_string(),
             ]
         );
 
         // File #2
-        // Check `directory` value
-        assert_eq!(compile_commands[1].directory.to_str().unwrap(), DIRECTORY);
         // Check `filename` value
-        assert_eq!(compile_commands[1].filename.to_str().unwrap(), "file2.cc");
+        assert_eq!(
+            compile_commands[1].filename,
+            root_dir_path.join("file2.cc").canonicalize().unwrap()
+        );
         // Check `arguments` value
         assert_eq!(
             *compile_commands[1].arguments,
@@ -135,7 +141,7 @@ mod tests {
                 "-c".to_string(),
                 "-o".to_string(),
                 "file2.o".to_string(),
-                "file2.cc".to_string(),
+                "tests/data/compile_commands/file2.cc".to_string(),
             ]
         );
     }
