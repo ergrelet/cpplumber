@@ -1,3 +1,4 @@
+mod cli;
 mod compilation_database;
 mod information_leak;
 mod suppressions;
@@ -21,60 +22,11 @@ use structopt::StructOpt;
 use suppressions::Suppressions;
 
 use crate::{
+    cli::CpplumberOptions,
     compilation_database::{CompilationDatabase, CompileCommandsDatabase, FileListDatabase},
     information_leak::{print_confirmed_leaks, PotentialLeak},
     suppressions::parse_suppressions_file,
 };
-
-const PKG_NAME: &str = env!("CARGO_PKG_NAME");
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = PKG_NAME, about = "An information leak detector for C and C++ code bases")]
-struct CpplumberOptions {
-    /// Path to the output binary to scan for leaked information.
-    #[structopt(parse(from_os_str), short, long = "bin")]
-    binary_file_path: PathBuf,
-
-    /// Additional include directories.
-    /// Only used when project files aren't used.
-    #[structopt(short = "I")]
-    include_directories: Vec<String>,
-
-    /// Additional preprocessor definitions.
-    /// Only used when project files aren't used.
-    #[structopt(short = "D")]
-    compile_definitions: Vec<String>,
-
-    /// Compilation database.
-    #[structopt(parse(from_os_str), short, long = "project")]
-    project_file_path: Option<PathBuf>,
-
-    /// Path to a file containing rules to prevent certain errors from being
-    /// generated.
-    #[structopt(parse(from_os_str), short, long)]
-    suppressions_list: Option<PathBuf>,
-
-    /// Only report leaks once for artifacts declared in multiple locations.
-    #[structopt(long)]
-    ignore_multiple_declarations: bool,
-
-    /// Report leaks for data declared in system headers
-    #[structopt(long)]
-    report_system_headers: bool,
-
-    /// Minimum required size in bytes, for a leak to be reported. Defaults to 4.
-    /// Warning: Setting this to a lower value might greatly increase resource
-    /// consumption and reports' sizes.
-    #[structopt(short, long)]
-    minimum_leak_size: Option<usize>,
-
-    /// Generate output as JSON.
-    #[structopt(short, long = "json")]
-    json_output: bool,
-
-    /// List of source files to scan for (can be glob expressions).
-    source_path_globs: Vec<String>,
-}
 
 fn main() -> Result<()> {
     // Default to 'info' if 'RUST_LOG' is not set
@@ -134,7 +86,7 @@ fn main() -> Result<()> {
         "Looking for leaks in '{}'...",
         options.binary_file_path.display()
     );
-    let leaks = if options.ignore_multiple_declarations {
+    let leaks = if options.ignore_multiple_locations {
         // Remove duplicated artifacts if needed
         let potential_leaks: HashSet<PotentialLeak> = HashSet::from_iter(potential_leaks);
         log::debug!("{:#?}", potential_leaks);
