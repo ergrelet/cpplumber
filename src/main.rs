@@ -3,7 +3,7 @@ mod information_leak;
 mod suppressions;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fs::File,
     io::Read,
     path::{Path, PathBuf},
@@ -377,7 +377,7 @@ fn filter_suppressed_artifacts_by_value(
 fn find_leaks_in_binary_file<PotentialLeakCollection>(
     binary_file_path: &Path,
     leak_desc: PotentialLeakCollection,
-) -> Result<Vec<ConfirmedLeak>>
+) -> Result<BTreeSet<ConfirmedLeak>>
 where
     PotentialLeakCollection: IntoParallelIterator<Item = PotentialLeak>,
 {
@@ -423,7 +423,7 @@ where
         .enumerate()
         // Find actual leaks
         .map(|(i, byte_value)| {
-            let mut confirmed_leaks = vec![];
+            let mut confirmed_leaks = BTreeSet::new();
             if let Some(potential_leaks) = byte_to_leaks.get(byte_value) {
                 // Go through each candidate
                 for leak in potential_leaks {
@@ -432,7 +432,7 @@ where
                         let byte_slice = &bin_data[i..i + leak.bytes.len()];
                         if byte_slice == leak.bytes {
                             // Bytes match, the leak is confirmed
-                            confirmed_leaks.push(ConfirmedLeak {
+                            confirmed_leaks.insert(ConfirmedLeak {
                                 leaked_information: leak.leaked_information.clone(),
                                 location: information_leak::LeakLocation {
                                     source: leak.declaration_metadata.clone(),
@@ -449,9 +449,8 @@ where
 
             confirmed_leaks
         })
-        // Reduce intermediate vectors into one
-        .reduce(Vec::new, |mut accum, mut other| {
-            accum.append(&mut other);
+        .reduce(BTreeSet::new, |mut accum, other| {
+            accum.extend(other);
             accum
         });
 
@@ -612,9 +611,9 @@ mod tests {
             "\"included_string_literal\"",
             "\"preprocessor_string_literal\"",
             "\"%s\\n\"",
-            "\"%s\\n\"",
             "L\"preprocessor_string_literal\"",
             r#"L"%s\n""#,
+            "\"%s\\n\"",
         ];
 
         // Check extracted string literals

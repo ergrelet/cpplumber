@@ -1,4 +1,4 @@
-use std::{borrow::Cow, hash::Hash, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, collections::BTreeSet, hash::Hash, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use clang::{Entity, EntityKind};
@@ -16,7 +16,7 @@ pub enum WideCharMode {
     Unix,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PotentialLeak {
     /// Leaked information, as represented in the source code
     pub leaked_information: Arc<String>,
@@ -81,19 +81,45 @@ pub struct ConfirmedLeak {
     pub location: LeakLocation,
 }
 
-#[derive(Serialize)]
+impl PartialEq for ConfirmedLeak {
+    fn eq(&self, other: &Self) -> bool {
+        self.location == other.location
+    }
+}
+
+impl Eq for ConfirmedLeak {}
+
+impl PartialOrd for ConfirmedLeak {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.location.partial_cmp(&other.location)
+    }
+}
+
+impl Ord for ConfirmedLeak {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.location.cmp(&other.location)
+    }
+}
+
+impl Hash for ConfirmedLeak {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.location.hash(state);
+    }
+}
+
+#[derive(Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LeakLocation {
     pub source: Arc<SourceLocation>,
     pub binary: BinaryLocation,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SourceLocation {
     pub file: PathBuf,
     pub line: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BinaryLocation {
     pub file: Arc<PathBuf>,
     pub offset: u64,
@@ -102,7 +128,7 @@ pub struct BinaryLocation {
 #[derive(Serialize)]
 struct JsonReport {
     version: ReportVersion,
-    leaks: Vec<ConfirmedLeak>,
+    leaks: BTreeSet<ConfirmedLeak>,
 }
 
 #[derive(Serialize)]
@@ -282,7 +308,7 @@ fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
     }
 }
 
-pub fn print_confirmed_leaks(confirmed_leaks: Vec<ConfirmedLeak>, json: bool) -> Result<()> {
+pub fn print_confirmed_leaks(confirmed_leaks: BTreeSet<ConfirmedLeak>, json: bool) -> Result<()> {
     if json {
         let report = JsonReport {
             version: ReportVersion {
