@@ -1,5 +1,6 @@
-#include <stdio.h>
-#include <wchar.h>
+#include <cstdio>
+#include <memory>
+#include <cwchar>
 
 #include "header.h"
 
@@ -28,9 +29,17 @@ string)";
 static const char* my_escaped_string = "\'\"\n\t\a\b|\x90|\220|\u9999|\U00009999|😂";
 // static const char* my_commented_string = "commented_string";
 
+struct MyStruct {};
+struct MyClass {};
+
 int main() {
     printf("%s\n", PREPROCESSOR_STRING_LITERAL);
     wprintf(L"%s\n", PREPROCESSOR_WIDE_STRING_LITERAL);
     printf("%s\n", included_string_literal);
+
+    // Force the generation of some RTTI
+    std::shared_ptr<MyStruct> struct_ptr = std::make_unique<MyStruct>();
+    std::shared_ptr<MyClass> class_ptr = std::make_unique<MyClass>();
+
     return 0;
 }
