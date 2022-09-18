@@ -32,30 +32,35 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
     type Error = anyhow::Error;
 
     fn try_from(entity: Entity) -> Result<Self, Self::Error> {
-        match entity.get_kind() {
-            EntityKind::StringLiteral => {
-                let leaked_information = entity
-                    .get_display_name()
-                    .ok_or_else(|| anyhow!("Failed to get entity's display name"))?;
-                let location = entity
-                    .get_location()
-                    .ok_or_else(|| anyhow!("Failed to get entity's location"))?
-                    .get_file_location();
-                let file_location = location
-                    .file
-                    .ok_or_else(|| anyhow!("Failed to get entity's file location"))?
-                    .get_path();
-                let line_location = location.line;
+        let leaked_information = entity
+            .get_display_name()
+            .ok_or_else(|| anyhow!("Failed to get entity's display name"))?;
+        let location = entity
+            .get_location()
+            .ok_or_else(|| anyhow!("Failed to get entity's location"))?
+            .get_file_location();
+        let file_location = location
+            .file
+            .ok_or_else(|| anyhow!("Failed to get entity's file location"))?
+            .get_path();
 
-                Ok(Self {
-                    bytes: string_literal_to_bytes(&leaked_information, None)?,
-                    leaked_information: Arc::new(leaked_information),
-                    declaration_metadata: Arc::new(SourceLocation {
-                        file: file_location.canonicalize()?,
-                        line: line_location as u64,
-                    }),
-                })
-            }
+        match entity.get_kind() {
+            EntityKind::StringLiteral => Ok(Self {
+                bytes: string_literal_to_bytes(&leaked_information, None)?,
+                leaked_information: Arc::new(leaked_information),
+                declaration_metadata: Arc::new(SourceLocation {
+                    file: file_location.canonicalize()?,
+                    line: location.line as u64,
+                }),
+            }),
+            EntityKind::StructDecl => Ok(Self {
+                bytes: leaked_information.as_bytes().to_vec(),
+                leaked_information: Arc::new(leaked_information),
+                declaration_metadata: Arc::new(SourceLocation {
+                    file: file_location.canonicalize()?,
+                    line: location.line as u64,
+                }),
+            }),
             _ => Err(anyhow!("Unsupported entity kind")),
         }
     }

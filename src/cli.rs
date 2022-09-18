@@ -44,6 +44,14 @@ pub struct CpplumberOptions {
     #[structopt(short, long)]
     pub minimum_leak_size: Option<usize>,
 
+    /// Ignore leaks of string literals.
+    #[structopt(long)]
+    pub ignore_string_literals: bool,
+
+    /// Ignore leaks of struct and class names.
+    #[structopt(long)]
+    pub ignore_struct_names: bool,
+
     /// Generate output as JSON.
     #[structopt(short, long = "json")]
     pub json_output: bool,

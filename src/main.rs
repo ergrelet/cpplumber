@@ -71,6 +71,8 @@ fn main() -> Result<()> {
         compile_commands,
         compilation_db.is_file_path_in_arguments(),
         !options.report_system_headers,
+        options.ignore_string_literals,
+        options.ignore_struct_names,
         minimum_leak_size,
     )?;
 
@@ -114,14 +116,13 @@ fn gather_entities_by_kind<'tu>(
     entity_kind_filter: &[EntityKind],
     ignore_system_headers: bool,
 ) -> Vec<Entity<'tu>> {
-    gather_entities_by_kind_rec(root_entity, entity_kind_filter, ignore_system_headers, 0)
+    gather_entities_by_kind_rec(root_entity, entity_kind_filter, ignore_system_headers)
 }
 
 fn gather_entities_by_kind_rec<'tu>(
     root_entity: Entity<'tu>,
     entity_kind_filter: &[EntityKind],
     ignore_system_headers: bool,
-    current_depth: usize,
 ) -> Vec<Entity<'tu>> {
     let mut entities = vec![];
 
@@ -140,12 +141,8 @@ fn gather_entities_by_kind_rec<'tu>(
             continue;
         }
 
-        let entities_sub = gather_entities_by_kind_rec(
-            child,
-            entity_kind_filter,
-            ignore_system_headers,
-            current_depth + 1,
-        );
+        let entities_sub =
+            gather_entities_by_kind_rec(child, entity_kind_filter, ignore_system_headers);
         entities.extend(entities_sub);
     }
 
@@ -229,6 +226,8 @@ fn extract_artifacts_from_source_files(
     compile_commands: CompileCommands,
     use_file_path_from_arguments: bool,
     ignore_system_headers: bool,
+    ignore_string_literals: bool,
+    ignore_struct_names: bool,
     minimum_leak_size: usize,
 ) -> Result<Vec<PotentialLeak>> {
     // Prepare the clang index
@@ -257,9 +256,19 @@ fn extract_artifacts_from_source_files(
                         format!("Failed to parse source file '{}'", file_path.display())
                     })?;
 
+                // Setup filter
+                let mut entity_kind_filter = vec![];
+                if !ignore_string_literals {
+                    entity_kind_filter.push(EntityKind::StringLiteral);
+                }
+                if !ignore_struct_names {
+                    entity_kind_filter.push(EntityKind::StructDecl);
+                }
+
+                // Gather entities
                 let string_literals = gather_entities_by_kind(
                     translation_unit.get_entity(),
-                    &[EntityKind::StringLiteral],
+                    &entity_kind_filter,
                     ignore_system_headers,
                 );
 
@@ -437,6 +446,8 @@ mod tests {
                 .expect("get_all_compile_commands failed"),
             file_list_db.is_file_path_in_arguments(),
             true,
+            false,
+            false,
             0,
         )
         .expect("extract_artifacts_from_source_files failed");
@@ -460,6 +471,8 @@ mod tests {
             "\"concatenated_string\"",
             r#""multiline\nstring""#,
             r#""'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202""#,
+            "MyStruct",
+            "MyClass",
             r#""%s\n""#,
             "\"preprocessor_string_literal\"",
             r#"L"%s\n""#,
@@ -492,6 +505,8 @@ mod tests {
                 .expect("get_all_compile_commands failed"),
             file_list_db.is_file_path_in_arguments(),
             true,
+            false,
+            false,
             4,
         )
         .expect("extract_artifacts_from_source_files failed");
@@ -514,6 +529,8 @@ mod tests {
             "\"concatenated_string\"",
             r#""multiline\nstring""#,
             r#""'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202""#,
+            "MyStruct",
+            "MyClass",
             "\"preprocessor_string_literal\"",
             r#"L"%s\n""#,
             "L\"preprocessor_string_literal\"",
@@ -546,6 +563,8 @@ mod tests {
                 .expect("get_all_compile_commands failed"),
             file_list_db.is_file_path_in_arguments(),
             true,
+            false,
+            false,
             0,
         )
         .expect("extract_artifacts_from_source_files failed");
@@ -561,11 +580,15 @@ mod tests {
         let expected_string_literals = vec![
             // main.cc
             "\"included_string_literal\"",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyClass",
+            "MyClass",
+            "MyClass",
             "\"preprocessor_string_literal\"",
-            "\"%s\\n\"",
             "L\"preprocessor_string_literal\"",
             r#"L"%s\n""#,
-            "\"%s\\n\"",
         ];
 
         // Check extracted string literals
@@ -592,6 +615,8 @@ mod tests {
                 .expect("get_all_compile_commands failed"),
             file_list_db.is_file_path_in_arguments(),
             true,
+            false,
+            false,
             0,
         )
         .expect("extract_artifacts_from_source_files failed");
@@ -607,6 +632,30 @@ mod tests {
         let expected_string_literals = vec![
             // main.cc
             "\"included_string_literal\"",
+            "\"included_string_literal\"",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyStruct",
+            "MyClass",
+            "MyClass",
+            "MyClass",
+            "MyClass",
+            "MyClass",
+            "MyClass",
+            "MyClass",
+            "MyClass",
+            "MyClass",
+            "MyClass",
+            "MyClass",
             "\"preprocessor_string_literal\"",
             r#"L"%s\n""#,
             "L\"preprocessor_string_literal\"",
