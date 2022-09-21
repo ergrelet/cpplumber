@@ -15,7 +15,6 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use clang::{Clang, Entity, EntityKind, Index};
-use glob::glob;
 use rayon::prelude::*;
 use structopt::StructOpt;
 
@@ -26,7 +25,7 @@ use suppressions::Suppressions;
 
 use crate::{
     cli::CpplumberOptions,
-    compilation_database::{CompilationDatabase, CompileCommandsDatabase, FileListDatabase},
+    compilation_database::{generate_compilation_database, ProjectConfiguration},
     information_leak::PotentialLeak,
     suppressions::parse_suppressions_file,
 };
@@ -59,8 +58,18 @@ fn main() -> Result<()> {
     };
 
     log::info!("Gathering source files...");
+    // Extract project configuration from the CLI
+    let project_config = if let Some(ref project_file_path) = options.project_file_path {
+        ProjectConfiguration::CompilationDatabase { project_file_path }
+    } else {
+        ProjectConfiguration::Manual {
+            source_path_globs: &options.source_path_globs,
+            include_directories: &options.include_directories,
+            compile_definitions: &options.compile_definitions,
+        }
+    };
     // Parse project file or process glob expressions
-    let compilation_db = generate_compilation_database(&options)?;
+    let compilation_db = generate_compilation_database(project_config)?;
 
     log::info!("Filtering suppressed files...");
     // Filter suppressed files from the list, to avoid parsing files we're not
@@ -150,56 +159,6 @@ fn gather_entities_by_kind_rec<'tu>(
     }
 
     entities
-}
-
-fn generate_compilation_database(
-    options: &CpplumberOptions,
-) -> Result<Box<dyn CompilationDatabase>> {
-    if let Some(ref project_file_path) = options.project_file_path {
-        // Parse compile commands from the JSON database
-        Ok(Box::new(CompileCommandsDatabase::new(project_file_path)?))
-    } else {
-        // Otherwise, process glob expressions
-        let file_paths = options
-            .source_path_globs
-            .par_iter()
-            .try_fold(
-                Vec::new,
-                |mut accum, glob_expression| -> Result<Vec<PathBuf>> {
-                    if let Ok(paths) = glob(glob_expression) {
-                        for path in paths {
-                            accum.push(path?);
-                        }
-                    } else {
-                        log::warn!(
-                            "'{}' is not a valid path or glob expression, ignoring it",
-                            glob_expression
-                        );
-                    }
-
-                    Ok(accum)
-                },
-            )
-            .try_reduce(Vec::new, |mut accum, mut other| {
-                accum.append(&mut other);
-                Ok(accum)
-            })?;
-
-        // Generate `arguments` from the CLI arguments
-        let mut arguments = vec![];
-
-        // Add include directories to the list of arguments
-        for include_dir in options.include_directories.iter() {
-            arguments.push(format!("-I{}", include_dir));
-        }
-        // Add preprocessor defitions to the list of arguments
-        for compile_def in options.compile_definitions.iter() {
-            arguments.push(format!("-D{}", compile_def));
-        }
-
-        log::debug!("Using arguments: {:?}", arguments);
-        Ok(Box::new(FileListDatabase::new(&file_paths, arguments)))
-    }
 }
 
 fn filter_suppressed_files(
@@ -424,6 +383,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::compilation_database::{CompilationDatabase, FileListDatabase};
+
     use super::*;
 
     use serial_test::serial;
