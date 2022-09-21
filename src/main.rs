@@ -263,6 +263,7 @@ fn extract_artifacts_from_source_files(
                 }
                 if !ignore_struct_names {
                     entity_kind_filter.push(EntityKind::StructDecl);
+                    entity_kind_filter.push(EntityKind::ClassDecl);
                 }
 
                 // Gather entities
@@ -431,10 +432,7 @@ mod tests {
     fn extract_artifacts_from_source_files_file_list() {
         let root_dir_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FILE_LIST_PROJ_PATH);
         let file_list_db = FileListDatabase::new(
-            &[
-                root_dir_path.join("main.cc"),
-                root_dir_path.join("header.h"),
-            ],
+            &[root_dir_path.join("main.cc")],
             vec![
                 "-DDEF_TEST".to_string(),
                 format!("-I{}", FILE_LIST_PROJ_PATH),
@@ -453,9 +451,6 @@ mod tests {
         .expect("extract_artifacts_from_source_files failed");
 
         let expected_string_literals = vec![
-            // header.h
-            "\"included_string_literal\"",
-            // main.cc
             "\"included_string_literal\"",
             "\"c_string\"",
             "u8\"utf8_string\"",
@@ -472,7 +467,9 @@ mod tests {
             r#""multiline\nstring""#,
             r#""'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202""#,
             "MyStruct",
+            "",
             "MyClass",
+            "",
             r#""%s\n""#,
             "\"preprocessor_string_literal\"",
             r#"L"%s\n""#,

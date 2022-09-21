@@ -56,7 +56,7 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
                     }),
                 })
             }
-            EntityKind::StructDecl => {
+            EntityKind::StructDecl | EntityKind::ClassDecl => {
                 let leaked_information = entity.get_display_name().unwrap_or_default();
 
                 Ok(Self {

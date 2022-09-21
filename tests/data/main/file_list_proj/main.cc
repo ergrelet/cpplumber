@@ -29,8 +29,21 @@ string)";
 static const char* my_escaped_string = "\'\"\n\t\a\b|\x90|\220|\u9999|\U00009999|😂";
 // static const char* my_commented_string = "commented_string";
 
-struct MyStruct {};
-struct MyClass {};
+struct MyStruct {
+    // Unnamed struct
+    struct {
+        int field1;
+    };
+};
+
+class MyClass {
+    public:
+    // Unnamed class
+    class {
+        public:
+        int field1;
+    };
+};
 
 int main() {
     printf("%s\n", PREPROCESSOR_STRING_LITERAL);
