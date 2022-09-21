@@ -1,14 +1,12 @@
-use std::{borrow::Cow, collections::BTreeSet, hash::Hash, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, hash::Hash, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use clang::{Entity, EntityKind};
-use serde::Serialize;
 use widestring::{encode_utf16, encode_utf32};
 
-const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-const REPORT_FORMAT_VERSION: u32 = 1;
+use super::SourceLocation;
 
-/// Enum that the kind of wide chars to use
+/// Kind of wide chars to use when encoding wide strings
 pub enum WideCharMode {
     /// Wide strings are encoded as UTF-16LE
     Windows,
@@ -16,6 +14,8 @@ pub enum WideCharMode {
     Unix,
 }
 
+/// Struct containing information on a piece of data from the source code, which
+/// may leak into a binary file.
 #[derive(Debug)]
 pub struct PotentialLeak {
     /// Leaked information, as represented in the source code
@@ -85,68 +85,6 @@ impl Hash for PotentialLeak {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.leaked_information.hash(state);
     }
-}
-
-#[derive(Serialize)]
-pub struct ConfirmedLeak {
-    pub leaked_information: Arc<String>,
-    pub location: LeakLocation,
-}
-
-impl PartialEq for ConfirmedLeak {
-    fn eq(&self, other: &Self) -> bool {
-        self.location == other.location
-    }
-}
-
-impl Eq for ConfirmedLeak {}
-
-impl PartialOrd for ConfirmedLeak {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.location.partial_cmp(&other.location)
-    }
-}
-
-impl Ord for ConfirmedLeak {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.location.cmp(&other.location)
-    }
-}
-
-impl Hash for ConfirmedLeak {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.location.hash(state);
-    }
-}
-
-#[derive(Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct LeakLocation {
-    pub source: Arc<SourceLocation>,
-    pub binary: BinaryLocation,
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SourceLocation {
-    pub file: PathBuf,
-    pub line: u64,
-}
-
-#[derive(Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct BinaryLocation {
-    pub file: Arc<PathBuf>,
-    pub offset: u64,
-}
-
-#[derive(Serialize)]
-struct JsonReport {
-    version: ReportVersion,
-    leaks: BTreeSet<ConfirmedLeak>,
-}
-
-#[derive(Serialize)]
-struct ReportVersion {
-    executable: String,
-    format: u32,
 }
 
 /// We have to reimplement this ourselves since the `clang` crate doesn't
@@ -318,32 +256,6 @@ fn process_escape_sequences(string: &str) -> Option<Cow<str>> {
     } else {
         Some(Cow::Borrowed(string))
     }
-}
-
-pub fn print_confirmed_leaks(confirmed_leaks: BTreeSet<ConfirmedLeak>, json: bool) -> Result<()> {
-    if json {
-        let report = JsonReport {
-            version: ReportVersion {
-                executable: PKG_VERSION.into(),
-                format: REPORT_FORMAT_VERSION,
-            },
-            leaks: confirmed_leaks,
-        };
-        serde_json::to_writer(std::io::stdout(), &report)?;
-    } else {
-        for leak in confirmed_leaks {
-            println!(
-                "{} leaked at offset 0x{:x} in \"{}\" [declared at {}:{}]",
-                leak.leaked_information,
-                leak.location.binary.offset,
-                leak.location.binary.file.display(),
-                leak.location.source.file.display(),
-                leak.location.source.line,
-            );
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

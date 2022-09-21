@@ -1,6 +1,7 @@
 mod cli;
 mod compilation_database;
 mod information_leak;
+mod reporting;
 mod suppressions;
 
 use std::{
@@ -14,17 +15,19 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use clang::{Clang, Entity, EntityKind, Index};
-use compilation_database::CompileCommands;
 use glob::glob;
-use information_leak::{BinaryLocation, ConfirmedLeak};
 use rayon::prelude::*;
 use structopt::StructOpt;
+
+use compilation_database::CompileCommands;
+use information_leak::{BinaryLocation, ConfirmedLeak};
+use reporting::dump_confirmed_leaks;
 use suppressions::Suppressions;
 
 use crate::{
     cli::CpplumberOptions,
     compilation_database::{CompilationDatabase, CompileCommandsDatabase, FileListDatabase},
-    information_leak::{print_confirmed_leaks, PotentialLeak},
+    information_leak::PotentialLeak,
     suppressions::parse_suppressions_file,
 };
 
@@ -104,7 +107,7 @@ fn main() -> Result<()> {
         Ok(())
     } else {
         // Print the result to stdout
-        print_confirmed_leaks(leaks, options.json_output)?;
+        dump_confirmed_leaks(std::io::stdout(), leaks, options.json_output)?;
 
         // Return an error to indicate that leaks were found (useful for automation)
         Err(anyhow!("Leaks detected!"))
