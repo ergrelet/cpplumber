@@ -5,7 +5,7 @@ mod reporting;
 mod suppressions;
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     fs::File,
     io::Read,
     path::{Path, PathBuf},
@@ -26,7 +26,9 @@ use suppressions::Suppressions;
 use crate::{
     cli::CpplumberOptions,
     compilation_database::{generate_compilation_database, ProjectConfiguration},
-    information_leak::PotentialLeak,
+    information_leak::{
+        ConfirmedLeakWithUniqueLocation, ConfirmedLeakWithUniqueValue, PotentialLeak,
+    },
     suppressions::parse_suppressions_file,
 };
 
@@ -100,26 +102,39 @@ fn main() -> Result<()> {
         "Looking for leaks in '{}'...",
         options.binary_file_path.display()
     );
-    let leaks = if options.ignore_multiple_locations {
-        // Remove duplicated artifacts if needed
-        let potential_leaks: HashSet<PotentialLeak> = HashSet::from_iter(potential_leaks);
-        log::debug!("{:#?}", potential_leaks);
-        find_leaks_in_binary_file(&options.binary_file_path, potential_leaks)?
-    } else {
-        log::debug!("{:#?}", potential_leaks);
-        find_leaks_in_binary_file(&options.binary_file_path, potential_leaks)?
-    };
-    log::debug!("Done!");
+    log::debug!("{:#?}", potential_leaks);
+    if options.ignore_multiple_locations {
+        // Find leaks and deduplicate based on their value
+        let leaks: BTreeSet<ConfirmedLeakWithUniqueValue> =
+            find_leaks_in_binary_file(&options.binary_file_path, potential_leaks)?;
+        log::debug!("Done!");
 
-    if leaks.is_empty() {
-        // Nothing leaked, alright!
-        Ok(())
-    } else {
-        // Print the result to stdout
-        dump_confirmed_leaks(std::io::stdout(), leaks, options.json_output)?;
+        if leaks.is_empty() {
+            // Nothing leaked, alright!
+            Ok(())
+        } else {
+            // Print the result to stdout
+            dump_confirmed_leaks(std::io::stdout(), leaks, options.json_output)?;
 
-        // Return an error to indicate that leaks were found (useful for automation)
-        Err(anyhow!("Leaks detected!"))
+            // Return an error to indicate that leaks were found (useful for automation)
+            Err(anyhow!("Leaks detected!"))
+        }
+    } else {
+        // Find leaks and deduplicate based on their location (source + binary)
+        let leaks: BTreeSet<ConfirmedLeakWithUniqueLocation> =
+            find_leaks_in_binary_file(&options.binary_file_path, potential_leaks)?;
+        log::debug!("Done!");
+
+        if leaks.is_empty() {
+            // Nothing leaked, alright!
+            Ok(())
+        } else {
+            // Print the result to stdout
+            dump_confirmed_leaks(std::io::stdout(), leaks, options.json_output)?;
+
+            // Return an error to indicate that leaks were found (useful for automation)
+            Err(anyhow!("Leaks detected!"))
+        }
     }
 }
 
@@ -298,12 +313,13 @@ fn filter_suppressed_artifacts_by_value(
     }
 }
 
-fn find_leaks_in_binary_file<PotentialLeakCollection>(
+fn find_leaks_in_binary_file<PotentialLeakCollection, SortedConfirmedLeak>(
     binary_file_path: &Path,
     leak_desc: PotentialLeakCollection,
-) -> Result<BTreeSet<ConfirmedLeak>>
+) -> Result<BTreeSet<SortedConfirmedLeak>>
 where
     PotentialLeakCollection: IntoParallelIterator<Item = PotentialLeak>,
+    SortedConfirmedLeak: From<ConfirmedLeak> + Ord + Eq + Send,
 {
     // Read binary file's content
     let mut bin_file = File::open(binary_file_path)?;
@@ -356,7 +372,7 @@ where
                         let byte_slice = &bin_data[i..i + leak.bytes.len()];
                         if byte_slice == leak.bytes {
                             // Bytes match, the leak is confirmed
-                            confirmed_leaks.insert(ConfirmedLeak {
+                            confirmed_leaks.insert(SortedConfirmedLeak::from(ConfirmedLeak {
                                 leaked_information: leak.leaked_information.clone(),
                                 location: information_leak::LeakLocation {
                                     source: leak.declaration_metadata.clone(),
@@ -365,7 +381,7 @@ where
                                         offset: i as u64,
                                     },
                                 },
-                            });
+                            }));
                         }
                     }
                 }
@@ -535,8 +551,9 @@ mod tests {
             .join(FILE_LIST_PROJ_PATH)
             .join("a.exe");
 
-        let confirmed_leaks = find_leaks_in_binary_file(&bin_path, potential_leaks)
-            .expect("find_leaks_in_binary_file failed");
+        let confirmed_leaks: BTreeSet<ConfirmedLeakWithUniqueLocation> =
+            find_leaks_in_binary_file(&bin_path, potential_leaks)
+                .expect("find_leaks_in_binary_file failed");
 
         let expected_string_literals = vec![
             // main.cc
@@ -587,8 +604,9 @@ mod tests {
             .join(FILE_LIST_PROJ_PATH)
             .join("a.out");
 
-        let confirmed_leaks = find_leaks_in_binary_file(&bin_path, potential_leaks)
-            .expect("find_leaks_in_binary_file failed");
+        let confirmed_leaks: BTreeSet<ConfirmedLeakWithUniqueLocation> =
+            find_leaks_in_binary_file(&bin_path, potential_leaks)
+                .expect("find_leaks_in_binary_file failed");
 
         let expected_string_literals = vec![
             // main.cc

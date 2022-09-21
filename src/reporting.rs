@@ -9,9 +9,9 @@ const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const REPORT_FORMAT_VERSION: u32 = 1;
 
 #[derive(Serialize)]
-struct JsonReport {
+struct JsonReport<SortedConfirmedLeak: Into<ConfirmedLeak> + Ord + Eq + Serialize> {
     version: ReportVersion,
-    leaks: BTreeSet<ConfirmedLeak>,
+    leaks: BTreeSet<SortedConfirmedLeak>,
 }
 
 #[derive(Serialize)]
@@ -20,11 +20,15 @@ struct ReportVersion {
     format: u32,
 }
 
-pub fn dump_confirmed_leaks<W: std::io::Write>(
+pub fn dump_confirmed_leaks<W, SortedConfirmedLeak>(
     mut writer: W,
-    confirmed_leaks: BTreeSet<ConfirmedLeak>,
+    confirmed_leaks: BTreeSet<SortedConfirmedLeak>,
     json: bool,
-) -> Result<()> {
+) -> Result<()>
+where
+    W: std::io::Write,
+    SortedConfirmedLeak: Into<ConfirmedLeak> + Ord + Eq + Serialize,
+{
     if json {
         let report = JsonReport {
             version: ReportVersion {
@@ -36,6 +40,7 @@ pub fn dump_confirmed_leaks<W: std::io::Write>(
         serde_json::to_writer(writer, &report)?;
     } else {
         for leak in confirmed_leaks {
+            let leak: ConfirmedLeak = leak.into();
             writeln!(
                 &mut writer,
                 "{} leaked at offset 0x{:x} in \"{}\" [declared at {}:{}]",
