@@ -431,30 +431,30 @@ mod tests {
         .expect("extract_artifacts_from_source_files failed");
 
         let expected_string_literals = vec![
-            "\"included_string_literal\"",
-            "\"c_string\"",
-            "u8\"utf8_string\"",
-            "L\"wide_string\"",
-            "u\"utf16_string\"",
-            "U\"utf32_string\"",
-            "\"raw_string\"",
-            "u8\"raw_utf8_string\"",
-            "L\"wide_raw_string\"",
-            "u\"raw_utf16_string\"",
-            "U\"raw_utf32_string\"",
-            "\"def_test\"",
-            "\"concatenated_string\"",
-            r#""multiline\nstring""#,
-            r#""'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202""#,
+            "included_string_literal",
+            "c_string",
+            "utf8_string",
+            "wide_string",
+            "utf16_string",
+            "utf32_string",
+            "raw_string",
+            "raw_utf8_string",
+            "wide_raw_string",
+            "raw_utf16_string",
+            "raw_utf32_string",
+            "def_test",
+            "concatenated_string",
+            r#"multiline\nstring"#,
+            r#"'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202"#,
             "MyStruct",
             "",
             "MyClass",
             "",
-            r#""%s\n""#,
-            "\"preprocessor_string_literal\"",
-            r#"L"%s\n""#,
-            "L\"preprocessor_string_literal\"",
-            r#""%s\n""#,
+            r#"%s\n"#,
+            "preprocessor_string_literal",
+            r#"%s\n"#,
+            "preprocessor_string_literal",
+            r#"%s\n"#,
         ];
 
         // Check extracted string literals
@@ -491,26 +491,26 @@ mod tests {
         // r#""%s\n""# should be removed
         let expected_string_literals = vec![
             // main.cc
-            "\"included_string_literal\"",
-            "\"c_string\"",
-            "u8\"utf8_string\"",
-            "L\"wide_string\"",
-            "u\"utf16_string\"",
-            "U\"utf32_string\"",
-            "\"raw_string\"",
-            "u8\"raw_utf8_string\"",
-            "L\"wide_raw_string\"",
-            "u\"raw_utf16_string\"",
-            "U\"raw_utf32_string\"",
-            "\"def_test\"",
-            "\"concatenated_string\"",
-            r#""multiline\nstring""#,
-            r#""'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202""#,
+            "included_string_literal",
+            "c_string",
+            "utf8_string",
+            "wide_string",
+            "utf16_string",
+            "utf32_string",
+            "raw_string",
+            "raw_utf8_string",
+            "wide_raw_string",
+            "raw_utf16_string",
+            "raw_utf32_string",
+            "def_test",
+            "concatenated_string",
+            r#"multiline\nstring"#,
+            r#"'\"\n\t\a\b|\220|\220|\351\246\231|\351\246\231|\360\237\230\202"#,
             "MyStruct",
             "MyClass",
-            "\"preprocessor_string_literal\"",
-            r#"L"%s\n""#,
-            "L\"preprocessor_string_literal\"",
+            "preprocessor_string_literal",
+            r#"%s\n"#,
+            "preprocessor_string_literal",
         ];
 
         // Check extracted string literals
@@ -557,16 +557,16 @@ mod tests {
 
         let expected_string_literals = vec![
             // main.cc
-            "\"included_string_literal\"",
+            "included_string_literal",
             "MyStruct",
             "MyStruct",
             "MyStruct",
             "MyClass",
             "MyClass",
             "MyClass",
-            "\"preprocessor_string_literal\"",
-            "L\"preprocessor_string_literal\"",
-            r#"L"%s\n""#,
+            "preprocessor_string_literal",
+            "preprocessor_string_literal",
+            r#"%s\n"#,
         ];
 
         // Check extracted string literals
@@ -610,8 +610,8 @@ mod tests {
 
         let expected_string_literals = vec![
             // main.cc
-            "\"included_string_literal\"",
-            "\"included_string_literal\"",
+            "included_string_literal",
+            "included_string_literal",
             "MyStruct",
             "MyStruct",
             "MyStruct",
@@ -635,9 +635,9 @@ mod tests {
             "MyClass",
             "MyClass",
             "MyClass",
-            "\"preprocessor_string_literal\"",
-            r#"L"%s\n""#,
-            "L\"preprocessor_string_literal\"",
+            "preprocessor_string_literal",
+            r#"%s\n"#,
+            "preprocessor_string_literal",
         ];
 
         // Check extracted string literals

@@ -5,6 +5,6 @@ files:
 
 # Artifacts to ignore
 artifacts:
-  # This leak is not too bad
-  - "\"c_string\""
-  - "U\"utf32_string\""
+  # These leaks are not too bad
+  - c_string
+  - utf32_string

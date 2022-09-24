@@ -70,7 +70,7 @@ mod tests {
 
         // Artifacts
         assert_eq!(suppressions.artifacts.len(), 2);
-        assert_eq!(suppressions.artifacts[0], "\"c_string\"");
-        assert_eq!(suppressions.artifacts[1], "U\"utf32_string\"");
+        assert_eq!(suppressions.artifacts[0], "c_string");
+        assert_eq!(suppressions.artifacts[1], "utf32_string");
     }
 }

@@ -38,10 +38,11 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
                 let leaked_information = entity
                     .get_display_name()
                     .ok_or_else(|| anyhow!("Failed to get entity's display name"))?;
+                let (_, string_content) = parse_string_literal(&leaked_information)?;
 
                 Ok(Self {
                     bytes: string_literal_to_bytes(&leaked_information, None)?,
-                    leaked_information: Arc::new(leaked_information),
+                    leaked_information: Arc::new(string_content.to_owned()),
                     declaration_metadata: Arc::new(SourceLocation {
                         file: file_location.canonicalize()?,
                         line: location.line as u64,
