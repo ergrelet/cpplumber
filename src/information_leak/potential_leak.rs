@@ -4,19 +4,20 @@ use anyhow::{anyhow, Result};
 use clang::{Entity, EntityKind};
 use widestring::{encode_utf16, encode_utf32};
 
-use super::SourceLocation;
+use super::{LeakedDataType, SourceLocation};
 
 /// Struct containing information on a piece of data from the source code, which
 /// may leak into a binary file.
 #[derive(Debug)]
 pub struct PotentialLeak {
-    /// Leaked information, as represented in the source code
-    pub leaked_information: Arc<String>,
+    /// Type of data leaked
+    pub data_type: LeakedDataType,
+    /// Leaked data, as represented in the source code
+    pub data: Arc<String>,
     /// Byte pattern to match (i.e., leaked information, as represented in the
     /// binary file)
     pub bytes: Vec<u8>,
-    /// Data on where the leaked information is declared in the
-    /// source code
+    /// Information on where the leaked data is declared in the source code
     pub declaration_metadata: Arc<SourceLocation>,
 }
 
@@ -41,20 +42,28 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
                 let (_, string_content) = parse_string_literal(&leaked_information)?;
 
                 Ok(Self {
+                    data_type: LeakedDataType::StringLiteral,
+                    data: Arc::new(string_content.to_owned()),
                     bytes: string_literal_to_bytes(&leaked_information, None)?,
-                    leaked_information: Arc::new(string_content.to_owned()),
                     declaration_metadata: Arc::new(SourceLocation {
                         file: file_location.canonicalize()?,
                         line: location.line as u64,
                     }),
                 })
             }
-            EntityKind::StructDecl | EntityKind::ClassDecl => {
+            entity_kind @ (EntityKind::StructDecl | EntityKind::ClassDecl) => {
+                // Convert `EntityKind` to `LeakedDataType`
+                let data_type = match entity_kind {
+                    EntityKind::StructDecl => LeakedDataType::StructName,
+                    EntityKind::ClassDecl => LeakedDataType::ClassName,
+                    _ => unreachable!("This entity kind should not be matched"),
+                };
                 let leaked_information = entity.get_display_name().unwrap_or_default();
 
                 Ok(Self {
+                    data_type,
                     bytes: leaked_information.as_bytes().to_vec(),
-                    leaked_information: Arc::new(leaked_information),
+                    data: Arc::new(leaked_information),
                     declaration_metadata: Arc::new(SourceLocation {
                         file: file_location.canonicalize()?,
                         line: location.line as u64,
@@ -68,7 +77,7 @@ impl TryFrom<Entity<'_>> for PotentialLeak {
 
 impl PartialEq for PotentialLeak {
     fn eq(&self, other: &Self) -> bool {
-        self.leaked_information == other.leaked_information
+        self.data == other.data
     }
 }
 
@@ -76,7 +85,7 @@ impl Eq for PotentialLeak {}
 
 impl Hash for PotentialLeak {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.leaked_information.hash(state);
+        self.data.hash(state);
     }
 }
 

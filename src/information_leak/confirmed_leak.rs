@@ -2,13 +2,18 @@ use std::{ops::Deref, sync::Arc};
 
 use serde::Serialize;
 
-use super::LeakLocation;
+use super::{LeakLocation, LeakedDataType};
 
 /// Struct containing information on a piece of data that has leaked into a
 /// binary file.
 #[derive(Serialize)]
 pub struct ConfirmedLeak {
-    pub leaked_information: Arc<String>,
+    /// Type of data leaked
+    pub data_type: LeakedDataType,
+    /// Leaked data, as represented in the source code
+    pub data: Arc<String>,
+    /// Information on where the leaked data is declared in the source code as
+    /// well as found in in the target binary
     pub location: LeakLocation,
 }
 
@@ -82,7 +87,7 @@ impl Deref for ConfirmedLeakWithUniqueValue {
 
 impl PartialEq for ConfirmedLeakWithUniqueValue {
     fn eq(&self, other: &Self) -> bool {
-        self.0.leaked_information == other.0.leaked_information
+        self.0.data == other.0.data
     }
 }
 
@@ -90,14 +95,12 @@ impl Eq for ConfirmedLeakWithUniqueValue {}
 
 impl PartialOrd for ConfirmedLeakWithUniqueValue {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0
-            .leaked_information
-            .partial_cmp(&other.0.leaked_information)
+        self.0.data.partial_cmp(&other.0.data)
     }
 }
 
 impl Ord for ConfirmedLeakWithUniqueValue {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.leaked_information.cmp(&other.0.leaked_information)
+        self.0.data.cmp(&other.0.data)
     }
 }

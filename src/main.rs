@@ -306,7 +306,7 @@ fn filter_suppressed_artifacts_by_value(
     if let Some(suppressions) = suppressions {
         potential_leaks
             .into_par_iter()
-            .filter(|leak| !suppressions.artifacts.contains(&leak.leaked_information))
+            .filter(|leak| !suppressions.artifacts.contains(&leak.data))
             .collect()
     } else {
         potential_leaks
@@ -373,7 +373,8 @@ where
                         if byte_slice == leak.bytes {
                             // Bytes match, the leak is confirmed
                             confirmed_leaks.insert(SortedConfirmedLeak::from(ConfirmedLeak {
-                                leaked_information: leak.leaked_information.clone(),
+                                data_type: leak.data_type,
+                                data: leak.data.clone(),
                                 location: information_leak::LeakLocation {
                                     source: leak.declaration_metadata.clone(),
                                     binary: BinaryLocation {
@@ -459,8 +460,8 @@ mod tests {
 
         // Check extracted string literals
         assert!(potential_leaks.iter().enumerate().all(|(i, leak)| {
-            println!("{:?}", leak.leaked_information);
-            *leak.leaked_information == expected_string_literals[i]
+            println!("{:?}", leak.data);
+            *leak.data == expected_string_literals[i]
         }));
         assert_eq!(expected_string_literals.len(), potential_leaks.len());
     }
@@ -515,8 +516,8 @@ mod tests {
 
         // Check extracted string literals
         assert!(potential_leaks.iter().enumerate().all(|(i, leak)| {
-            println!("{:?}", leak.leaked_information);
-            *leak.leaked_information == expected_string_literals[i]
+            println!("{:?}", leak.data);
+            *leak.data == expected_string_literals[i]
         }));
         assert_eq!(expected_string_literals.len(), potential_leaks.len());
     }
@@ -571,8 +572,8 @@ mod tests {
 
         // Check extracted string literals
         assert!(confirmed_leaks.iter().enumerate().all(|(i, leak)| {
-            println!("{:?}", leak.leaked_information);
-            *leak.leaked_information == expected_string_literals[i]
+            println!("{:?}", leak.data);
+            *leak.data == expected_string_literals[i]
         }));
         assert_eq!(confirmed_leaks.len(), expected_string_literals.len());
     }
@@ -642,8 +643,8 @@ mod tests {
 
         // Check extracted string literals
         assert!(confirmed_leaks.iter().enumerate().all(|(i, leak)| {
-            println!("{:?}", leak.leaked_information);
-            *leak.leaked_information == expected_string_literals[i]
+            println!("{:?}", leak.data);
+            *leak.data == expected_string_literals[i]
         }));
         assert_eq!(confirmed_leaks.len(), expected_string_literals.len());
     }
