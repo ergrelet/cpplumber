@@ -1,4 +1,4 @@
-# cpplumber [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://img.shields.io/badge/license-GPL--3.0-blue.svg) [![rustc 1.63.0](https://img.shields.io/badge/rust-1.63.0%2B-orange.svg)](https://img.shields.io/badge/rust-1.63.0%2B-orange.svg) [![Tests Status](https://github.com/ergrelet/cpplumber/workflows/Tests/badge.svg?branch=master)](https://github.com/ergrelet/cpplumber/actions?query=workflow%3ATests)
+# cpplumber [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://img.shields.io/badge/license-GPL--3.0-blue.svg) [![rustc 1.63.0](https://img.shields.io/badge/rust-1.63.0%2B-orange.svg)](https://img.shields.io/badge/rust-1.63.0%2B-orange.svg) [![Tests Status](https://github.com/ergrelet/cpplumber/workflows/Tests/badge.svg?branch=main)](https://github.com/ergrelet/cpplumber/actions?query=workflow%3ATests)
 
 Cpplumber is a static analysis tool that helps detecting and keeping track of C
 and C++ source code information that leaks into compiled executable files.
