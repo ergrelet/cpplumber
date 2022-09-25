@@ -1,10 +1,6 @@
 name: Tarpaulin
 
-on:
-  pull_request:
-  push:
-    branches:
-      - main
+on: [push]
 
 jobs:
   check:
@@ -28,10 +24,10 @@ jobs:
         uses: actions-rs/tarpaulin@v0.1
         with:
           version: '0.15.0'
-          args: '-- --test-threads 1'
+          args: '--ignore-tests --out Lcov -- --test-threads 1'
 
-      - name: Archive code coverage results
-        uses: actions/upload-artifact@v1
+      - name: Upload to Coveralls
+        uses: coverallsapp/github-action@master
         with:
-          name: code-coverage-report
-          path: cobertura.xml
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: './lcov.info'

@@ -1,4 +1,4 @@
-# cpplumber [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://img.shields.io/badge/license-GPL--3.0-blue.svg) [![rustc 1.63.0](https://img.shields.io/badge/rust-1.63.0%2B-orange.svg)](https://img.shields.io/badge/rust-1.63.0%2B-orange.svg) [![Tests Status](https://github.com/ergrelet/cpplumber/workflows/Tests/badge.svg?branch=main)](https://github.com/ergrelet/cpplumber/actions?query=workflow%3ATests)
+# cpplumber [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://img.shields.io/badge/license-GPL--3.0-blue.svg) [![rustc 1.63.0](https://img.shields.io/badge/rust-1.63.0%2B-orange.svg)](https://img.shields.io/badge/rust-1.63.0%2B-orange.svg) [![Tests Status](https://github.com/ergrelet/cpplumber/workflows/Tests/badge.svg?branch=main)](https://github.com/ergrelet/cpplumber/actions?query=workflow%3ATests) [![Coverage Status](https://coveralls.io/repos/github/ergrelet/cpplumber/badge.svg?branch=main)](https://coveralls.io/github/ergrelet/cpplumber?branch=main)
 
 Cpplumber is a static analysis tool that helps detecting and keeping track of C
 and C++ source code information that leaks into compiled executable files.
@@ -30,7 +30,9 @@ Error: Leaks detected!
 
 ## Documentation
 
-The full user documentation is available [here](https://github.com/ergrelet/cpplumber/blob/gh-pages/index.md).
+The full user documentation is available [here](https://ergrelet.github.io/cpplumber/)
+(and also [here](https://github.com/ergrelet/cpplumber/blob/gh-pages/index.md)
+as Markdown).
 
 ## How to Build
 
