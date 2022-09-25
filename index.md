@@ -89,7 +89,7 @@ cpplumber --bin a.out "src/**/*.cc" "src/**/*.h"
 ## Ignoring certain leak types
 
 Cpplumber can currently report leaks for string literals and class/struct names.
-However, it's possble to ignore a certain type of leaks with a command-line
+However, it's possible to ignore a certain type of leaks with a command-line
 argument:
 
 ```sh
