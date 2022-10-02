@@ -43,3 +43,16 @@ git clone https://github.com/ergrelet/cpplumber.git
 cd cpplumber
 cargo build --release
 ```
+
+## How to Install
+
+If you have Rust installed, you can easily install Cpplumber with `cargo`:
+```
+cargo install --git https://github.com/ergrelet/cpplumber --tag 0.1.0
+```
+
+After that, you can invoke `cpplumber` from anywhere through the command-line.
+
+Keep in mind that you need to have the required dependencies installed for
+`cpplumber` to run properly. Check out the user documentation for more details.
+
