@@ -19,10 +19,10 @@ the system.
 
 ## Linux
 
-On Linux distributions, you can install `clang` using your package manager.
-For example, on Ubuntu with `apt`:
+On Linux distributions, you can install `clang` and `libclang` using your
+package manager. For example, on Ubuntu with `apt`:
 ```sh
-sudo apt install clang
+sudo apt install clang libclang-dev
 ```
 
 ## Windows
